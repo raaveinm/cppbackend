@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.11)
 project(Hello CXX)
 set(CMAKE_CXX_STANDARD 20)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../conan_clion_setup.cmake)
+
 # enable generated Conan script conanbuildinfo.cmake
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 #  conanbuildinfo.cmake library management macros
