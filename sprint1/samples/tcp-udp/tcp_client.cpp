@@ -46,7 +46,7 @@ int main(const int argc, char *argv[]) {
 
     net::streambuf stream_buf;
     net::read_until(socket, stream_buf, '\n', error);
-    std::string server_answer{
+    const std::string server_answer{
             std::istreambuf_iterator(&stream_buf),
             std::istreambuf_iterator<char>()
     };
