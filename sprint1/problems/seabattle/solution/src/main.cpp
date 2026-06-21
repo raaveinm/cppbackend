@@ -41,7 +41,7 @@ void PrintFieldPair(const SeabattleField& left, const SeabattleField& right) {
 
 template <size_t sz>
 static std::optional<std::string> ReadExact(tcp::socket& socket) {
-    boost::array<char, sz> buf;
+    boost::array<char, sz> buf{};
     boost::system::error_code ec;
 
     net::read(socket, net::buffer(buf), net::transfer_exactly(sz), ec);
@@ -203,7 +203,7 @@ void StartServer(const SeabattleField& field, unsigned short port) {
     agent.StartGame(socket, false);
 };
 
-void StartClient(const SeabattleField& field, const std::string& ip_str, unsigned short port) {
+void StartClient(const SeabattleField& field, const std::string& ip_str, const unsigned short port) {
     SeabattleAgent agent(field);
     net::io_context io_context;
     boost::system::error_code error;
