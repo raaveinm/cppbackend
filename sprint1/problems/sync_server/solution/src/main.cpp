@@ -73,7 +73,7 @@ StringResponse HandleRequest(StringRequest&& req) {
     StringResponse resp(http::status::method_not_allowed, req.version());  // declaring response
     resp.set(http::field::content_type, ContentType::TEXT_HTML);      // content type
     resp.set(http::field::allow, "GET, HEAD");                        // Allowed methods
-    resp.body() = "Invalid method.";                                            // body
+    resp.body() = "Invalid method";                                            // body
     resp.content_length(resp.body().size());                            // response size
     resp.keep_alive(req.keep_alive());                                     // keep connection
 
@@ -106,7 +106,7 @@ void HandleConnection(tcp::socket& socket, RequestHandler&& handle_request) {
 ///////////////////////////////////////////////
 // Main
 ///////////////////////////////////////////////
-[[noreturn]] int main() {
+int main() {
     // initialization
     const auto ADDRESS = net::ip::make_address("0.0.0.0");
     constexpr unsigned short PORT = 8080;
@@ -116,6 +116,7 @@ void HandleConnection(tcp::socket& socket, RequestHandler&& handle_request) {
     std::cout << "Server has started..." << std::endl;
 
     // handling connections
+    // ReSharper disable once CppDFAEndlessLoop
     while (true) {
         tcp::socket socket(io_context);
         acceptor.accept(socket);
