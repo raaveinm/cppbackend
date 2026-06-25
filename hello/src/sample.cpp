@@ -26,7 +26,7 @@ int main() {
     {
         auto t = std::make_shared<net::steady_timer>(io, 3s);
         std::cout << "Fry eggs"sv << std::endl;
-        t->async_wait([t](sys::error_code ec) {
+        t->async_wait([t](const sys::error_code &ec) {
             if (ec) {
                 throw std::runtime_error("Wait error: "s + ec.message());
             }
@@ -37,7 +37,7 @@ int main() {
     {
         auto t = std::make_shared<net::steady_timer>(io, 5s);
         std::cout << "Brew coffee"sv << std::endl;
-        t->async_wait([t](sys::error_code ec) {
+        t->async_wait([t](const sys::error_code &ec) {
             if (ec) {
                 throw std::runtime_error("Wait error: "s + ec.message());
             }

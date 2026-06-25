@@ -118,7 +118,7 @@ int main() {
     };
 
     std::unordered_map<int, OrderResult> orders;
-    auto handle_result = [&orders](sys::error_code ec, int id, Hamburger* h) {
+    auto handle_result = [&orders](const sys::error_code &ec, int id, const Hamburger* h) {
         orders.emplace(id, OrderResult{ec, ec ? Hamburger{} : *h});
     };
 

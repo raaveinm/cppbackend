@@ -18,5 +18,6 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-add_executable(hello src/main.cpp)
+add_executable(hello src/sample.cpp)
+add_executable(hamburger src/hamburger.cpp)
 target_link_libraries(hello PRIVATE Threads::Threads)
