@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <optional>
+#include <mutex>
 
 #include "clock.h"
 #include "gascooker.h"
@@ -134,15 +135,27 @@ private:
 // Склад ингредиентов (возвращает ингредиенты с уникальным id)
 class Store {
 public:
+    Store(const Store&) = delete;
+    Store& operator=(const Store&) = delete;
+
+    static Store& GetInstance() {
+        static Store instance;
+        return instance;
+    }
+
     std::shared_ptr<Bread> GetBread() {
+        std::lock_guard<std::mutex> lock(mutex_);
         return std::make_shared<Bread>(++next_bread_id_);
     }
 
     std::shared_ptr<Sausage> GetSausage() {
+        std::lock_guard<std::mutex> lock(mutex_);
         return std::make_shared<Sausage>(++next_sausage_id_);
     }
 
 private:
-    inline static int next_bread_id_ = 0;
-    inline static int next_sausage_id_ = 0;
+    Store() = default;
+    int next_bread_id_ = 0;
+    int next_sausage_id_ = 0;
+    std::mutex mutex_;
 };
