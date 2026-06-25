@@ -20,4 +20,7 @@ find_package(Threads REQUIRED)
 
 add_executable(hello src/sample.cpp)
 add_executable(hamburger src/hamburger.cpp)
+add_executable(sync_sample src/sync_sample.cpp)
+
 target_link_libraries(hello PRIVATE Threads::Threads)
+target_link_libraries(sync_sample PRIVATE Threads::Threads)
