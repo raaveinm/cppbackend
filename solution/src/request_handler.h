@@ -7,64 +7,74 @@
 namespace http_handler {
 namespace beast = boost::beast;
 namespace http = beast::http;
+namespace net = boost::asio;
 namespace json = boost::json;
+
+namespace api_endpoints {
+constexpr std::string_view API_PREFIX = "/api/";
+constexpr std::string_view MAPS_API_PREFIX = "/api/v1/maps";
+} // namespace api_endpoints
 
 class RequestHandler {
 public:
-    explicit RequestHandler(model::Game& game)
-        : game_{game} {
-    }
+    explicit RequestHandler(model::Game &game) : game_{game} {}
 
-    RequestHandler(const RequestHandler&) = delete;
-    RequestHandler& operator=(const RequestHandler&) = delete;
+    RequestHandler(const RequestHandler &) = delete;
+    RequestHandler &operator=(const RequestHandler &) = delete;
 
     template <typename Body, typename Allocator, typename Send>
-    void operator()(http::request<Body, http::basic_fields<Allocator>>&& req, Send&& send) {
+    void operator()(http::request<Body, http::basic_fields<Allocator>> &&req,
+                    Send &&send) {
 
         if (req.method() != http::verb::get && req.method() != http::verb::head) {
-            send(MakeErrorResponse(http::status::bad_request, "badRequest", "Invalid method", req.version(), req.keep_alive()));
+            send(MakeErrorResponse(http::status::bad_request, "badRequest",
+                                     "Invalid method", req.version(),
+                                     req.keep_alive()));
             return;
         }
 
         const std::string_view target = req.target();
 
-        if (constexpr std::string_view api_prefix = "/api/v1/maps"; target.starts_with(api_prefix)) {
-            if (target == api_prefix) {
+        if (target.starts_with(api_endpoints::MAPS_API_PREFIX)) {
+            if (target == api_endpoints::MAPS_API_PREFIX) {
                 send(MakeMapsListResponse(req.version(), req.keep_alive()));
                 return;
-            } else if (target[api_prefix.size()] == '/') {
-                const std::string_view map_id_str = target.substr(api_prefix.size() + 1);
+            } else if (target[api_endpoints::MAPS_API_PREFIX.size()] == '/') {
+                const std::string_view map_id_str =
+                    target.substr(api_endpoints::MAPS_API_PREFIX.size() + 1);
                 const model::Map::Id id{std::string(map_id_str)};
-                const auto* map = game_.FindMap(id);
+                const auto *map = game_.FindMap(id);
 
                 if (!map) {
-                    send(MakeErrorResponse(http::status::not_found, "mapNotFound", "Map not found", req.version(), req.keep_alive()));
+                    send(MakeErrorResponse(http::status::not_found, "mapNotFound",
+                                             "Map not found", req.version(),
+                                             req.keep_alive()));
                     return;
                 }
-                send(MakeMapDescriptionResponse(*map, req.version(), req.keep_alive()));
+                send(MakeMapDescriptionResponse(*map, req.version(),
+                                                req.keep_alive()));
                 return;
             }
         }
 
-        if (target.starts_with("/api/")) {
-            send(MakeErrorResponse(http::status::bad_request, "badRequest", "Bad request", req.version(), req.keep_alive()));
+        if (target.starts_with(api_endpoints::API_PREFIX)) {
+            send(MakeErrorResponse(http::status::bad_request, "badRequest",
+                                     "Bad request", req.version(),
+                                     req.keep_alive()));
             return;
         }
 
-        send(MakeErrorResponse(http::status::bad_request, "badRequest", "Bad request", req.version(), req.keep_alive()));
+        send(MakeErrorResponse(http::status::bad_request, "badRequest",
+                                 "Bad request", req.version(), req.keep_alive()));
     }
 
 private:
-    model::Game& game_;
+    model::Game &game_;
 
-    // region helpers
     [[nodiscard]] static http::response<http::string_body> MakeErrorResponse(
-        const http::status status,
-        const std::string_view code,
-        const std::string_view message,
-        const unsigned version,
-        const bool keep_alive
-) {
+        const http::status status, const std::string_view code,
+        const std::string_view message, const unsigned version,
+        const bool keep_alive) {
         http::response<http::string_body> response(status, version);
         response.set(http::field::content_type, "application/json");
         response.keep_alive(keep_alive);
@@ -78,13 +88,14 @@ private:
         return response;
     }
 
-    [[nodiscard]] http::response<http::string_body> MakeMapsListResponse(const unsigned version, const bool keep_alive) const {
+    [[nodiscard]] http::response<http::string_body>
+    MakeMapsListResponse(const unsigned version, const bool keep_alive) const {
         http::response<http::string_body> response(http::status::ok, version);
         response.set(http::field::content_type, "application/json");
         response.keep_alive(keep_alive);
 
         json::array maps_arr;
-        for (const auto& map : game_.GetMaps()) {
+        for (const auto &map : game_.GetMaps()) {
             json::object map_obj;
             map_obj["id"] = *map.GetId();
             map_obj["name"] = map.GetName();
@@ -96,17 +107,9 @@ private:
         return response;
     }
 
-    [[nodiscard]] static http::response<http::string_body> MakeMapDescriptionResponse(const model::Map& map, const unsigned version, const bool keep_alive) {
-        http::response<http::string_body> response(http::status::ok, version);
-        response.set(http::field::content_type, "application/json");
-        response.keep_alive(keep_alive);
-
-        json::object map_obj;
-        map_obj["id"] = *map.GetId();
-        map_obj["name"] = map.GetName();
-
+    [[nodiscard]] static json::array GetRoadsAsJson(const model::Map &map) {
         json::array roads_arr;
-        for (const auto& road : map.GetRoads()) {
+        for (const auto &road : map.GetRoads()) {
             json::object road_obj;
             road_obj["x0"] = road.GetStart().x;
             road_obj["y0"] = road.GetStart().y;
@@ -117,10 +120,12 @@ private:
             }
             roads_arr.push_back(road_obj);
         }
-        map_obj["roads"] = roads_arr;
+        return roads_arr;
+    }
 
+    [[nodiscard]] static json::array GetBuildingsAsJson(const model::Map &map) {
         json::array buildings_arr;
-        for (const auto& b : map.GetBuildings()) {
+        for (const auto &b : map.GetBuildings()) {
             json::object b_obj;
             b_obj["x"] = b.GetBounds().position.x;
             b_obj["y"] = b.GetBounds().position.y;
@@ -128,10 +133,12 @@ private:
             b_obj["h"] = b.GetBounds().size.height;
             buildings_arr.push_back(b_obj);
         }
-        map_obj["buildings"] = buildings_arr;
+        return buildings_arr;
+    }
 
+    [[nodiscard]] static json::array GetOfficesAsJson(const model::Map &map) {
         json::array offices_arr;
-        for (const auto& office : map.GetOffices()) {
+        for (const auto &office : map.GetOffices()) {
             json::object o_obj;
             o_obj["id"] = *office.GetId();
             o_obj["x"] = office.GetPosition().x;
@@ -140,13 +147,27 @@ private:
             o_obj["offsetY"] = office.GetOffset().dy;
             offices_arr.push_back(o_obj);
         }
-        map_obj["offices"] = offices_arr;
+        return offices_arr;
+    }
+
+    [[nodiscard]] static http::response<http::string_body>
+    MakeMapDescriptionResponse(const model::Map &map, const unsigned version,
+                               const bool keep_alive) {
+        http::response<http::string_body> response(http::status::ok, version);
+        response.set(http::field::content_type, "application/json");
+        response.keep_alive(keep_alive);
+
+        json::object map_obj;
+        map_obj["id"] = *map.GetId();
+        map_obj["name"] = map.GetName();
+        map_obj["roads"] = GetRoadsAsJson(map);
+        map_obj["buildings"] = GetBuildingsAsJson(map);
+        map_obj["offices"] = GetOfficesAsJson(map);
 
         response.body() = json::serialize(map_obj);
         response.prepare_payload();
         return response;
     }
-    // endregion
 };
 
-}  // namespace http_handler
+} // namespace http_handler

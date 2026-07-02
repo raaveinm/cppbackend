@@ -30,7 +30,10 @@ void SessionBase::OnRead(const boost::system::error_code &ec, size_t bytes_read)
 
 void SessionBase::Close() {
     boost::system::error_code ec;
-    stream_.socket().shutdown(tcp::socket::shutdown_send, ec); // NOLINT(*-unused-return-value)
+    stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
+    if (ec) {
+        return ReportError(ec, "shutdown");
+    }
 }
 
 void SessionBase::Write(http::response<http::string_body> &&response) {
