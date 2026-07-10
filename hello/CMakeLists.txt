@@ -22,6 +22,7 @@ add_executable(hello src/sample.cpp)
 add_executable(hamburger src/hamburger.cpp)
 add_executable(sync_sample src/sync_sample.cpp)
 add_executable(async_server src/async_server_notes.cpp)
+add_executable(boost_fs src/boost_fs.cpp)
 
 target_link_libraries(hello PRIVATE Threads::Threads)
 target_link_libraries(sync_sample PRIVATE Threads::Threads)
