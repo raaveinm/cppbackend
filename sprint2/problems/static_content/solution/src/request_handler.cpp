@@ -47,6 +47,20 @@ bool RequestHandler::IsSubPath(const std::filesystem::path& path, const std::fil
     return !rel.empty() && rel.native()[0] != '.';
 }
 
+http::response<http::string_body> RequestHandler::MakeTextErrorResponse(
+    const http::status status,
+    const std::string_view message,
+    const unsigned version,
+    const bool keep_alive
+) {
+    http::response<http::string_body> response(status, version);
+    response.set(http::field::content_type, "text/plain");
+    response.keep_alive(keep_alive);
+    response.body() = std::string(message);
+    response.prepare_payload();
+    return response;
+}
+
 http::response<http::string_body> RequestHandler::MakeErrorResponse(
     const http::status status,
     const std::string_view code,

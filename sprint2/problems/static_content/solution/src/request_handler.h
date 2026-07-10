@@ -64,11 +64,11 @@ public:
             const std::filesystem::path file_path = static_path_ / decoded_path.substr(1);
 
             if (!IsSubPath(file_path, static_path_)) {
-                return send_error(http::status::bad_request, "badRequest", "Path is out of root directory");
+                return send(MakeTextErrorResponse(http::status::bad_request, "Bad Request: Path out of root", req.version(), req.keep_alive()));
             }
 
             if (!std::filesystem::exists(file_path)) {
-                return send_error(http::status::not_found, "notFound", "File not found");
+                return send(MakeTextErrorResponse(http::status::not_found, "File Not Found", req.version(), req.keep_alive()));
             }
 
             http::response<http::file_body> res;
@@ -99,6 +99,13 @@ private:
     [[nodiscard]] static http::response<http::string_body> MakeErrorResponse(
         http::status status,
         std::string_view code,
+        std::string_view message,
+        unsigned version,
+        bool keep_alive
+    );
+
+    [[nodiscard]] static http::response<http::string_body> MakeTextErrorResponse(
+        http::status status,
         std::string_view message,
         unsigned version,
         bool keep_alive
