@@ -1,4 +1,4 @@
-#include "my_logger.h"
+#include "../solution/my_logger.h"
 
 #include <string_view>
 #include <thread>
@@ -22,9 +22,9 @@ int main() {
     LOG("Brilliant logger.", " ", "I Love it");
 
     // Выполним ещё 100000 логирований.
-    static const int attempts = 100000;
+    static constexpr int attempts = 100000;
     for(int i = 0; i < attempts; ++i) {
-        std::chrono::system_clock::time_point ts(std::chrono::seconds(10000000 + i * 100));
+        const std::chrono::system_clock::time_point ts(std::chrono::seconds(10000000 + i * 100));
         Logger::GetInstance().SetTimestamp(ts);
 
         LOG("Logging attempt ", i, ". ", "I Love it");

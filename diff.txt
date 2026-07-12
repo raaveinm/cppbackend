@@ -1,418 +1,637 @@
-diff --git a/solution/CMakeLists.txt b/solution/CMakeLists.txt
-index 5dfa333..c7bd268 100644
---- a/solution/CMakeLists.txt
-+++ b/solution/CMakeLists.txt
-@@ -23,17 +23,16 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
- find_package(Threads REQUIRED)
+diff --git a/diff.txt b/diff.txt
+index 7b1b113..e69de29 100644
+--- a/diff.txt
++++ b/diff.txt
+@@ -1,418 +0,0 @@
+-diff --git a/solution/CMakeLists.txt b/solution/CMakeLists.txt
+-index 5dfa333..c7bd268 100644
+---- a/solution/CMakeLists.txt
+-+++ b/solution/CMakeLists.txt
+-@@ -23,17 +23,16 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
+- find_package(Threads REQUIRED)
+- 
+- add_executable(game_server
+--	src/main.cpp
+--	src/http_server.cpp
+--	src/http_server.h
+--	src/sdk.h
+--	src/model.h
+--	src/model.cpp
+--	src/tagged.h
+--	src/boost_json.cpp
+--	src/json_loader.h
+--	src/json_loader.cpp
+--	src/request_handler.cpp
+--	src/request_handler.h
+-+    src/main.cpp
+-+    src/http_server.cpp
+-+    src/http_server.h
+-+    src/sdk.h
+-+    src/model.h
+-+    src/model.cpp
+-+    src/tagged.h
+-+    src/boost_json.cpp
+-+    src/json_loader.h
+-+    src/json_loader.cpp
+-+    src/request_handler.h
+- )
+- target_link_libraries(game_server PRIVATE Threads::Threads)
+-diff --git a/solution/conanfile.txt b/solution/conanfile.txt
+-index 2c6fad0..c8f1a5a 100644
+---- a/solution/conanfile.txt
+-+++ b/solution/conanfile.txt
+-@@ -3,3 +3,4 @@ boost/1.78.0
+- 
+- [generators]
+- cmake
+-+CMakeToolchain
+-diff --git a/solution/src/http_server.cpp b/solution/src/http_server.cpp
+-index 4a60ed3..720bb1c 100644
+---- a/solution/src/http_server.cpp
+-+++ b/solution/src/http_server.cpp
+-@@ -30,7 +30,10 @@ void SessionBase::OnRead(const boost::system::error_code &ec, size_t bytes_read)
+- 
+- void SessionBase::Close() {
+-     boost::system::error_code ec;
+--    stream_.socket().shutdown(tcp::socket::shutdown_send, ec); // NOLINT(*-unused-return-value)
+-+    stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
+-+    if (ec) {
+-+        return ReportError(ec, "shutdown");
+-+    }
+- }
+- 
+- void SessionBase::Write(http::response<http::string_body> &&response) {
+-diff --git a/solution/src/json_loader.cpp b/solution/src/json_loader.cpp
+-index 8a5d1b8..c596d8c 100644
+---- a/solution/src/json_loader.cpp
+-+++ b/solution/src/json_loader.cpp
+-@@ -1,6 +1,7 @@
+- #include "json_loader.h"
+- #include <boost/json.hpp>
+- #include <fstream>
+-+#include <iostream>
+- #include <sstream>
+- #include <string>
+- 
+-@@ -8,67 +9,93 @@ namespace json = boost::json;
+- 
+- namespace json_loader {
+- 
+--model::Game LoadGame(const std::filesystem::path& json_path) {
+-+namespace {
+-+
+-+void LoadRoads(model::Map &map, const json::object &map_obj) {
+-+    if (map_obj.contains("roads")) {
+-+        for (const auto &road_val : map_obj.at("roads").as_array()) {
+-+            const auto &road_obj = road_val.as_object();
+-+            model::Coord x0 = road_obj.at("x0").as_int64();
+-+            model::Coord y0 = road_obj.at("y0").as_int64();
+-+
+-+            if (road_obj.contains("x1")) {
+-+                model::Coord x1 = road_obj.at("x1").as_int64();
+-+                map.AddRoad(
+-+                    model::Road(model::Road::HORIZONTAL, model::Point{x0, y0},
+-+                                x1));
+-+            } else if (road_obj.contains("y1")) {
+-+                model::Coord y1 = road_obj.at("y1").as_int64();
+-+                map.AddRoad(
+-+                    model::Road(model::Road::VERTICAL, model::Point{x0, y0}, y1));
+-+            }
+-+        }
+-+    }
+-+}
+-+
+-+void LoadBuildings(model::Map &map, const json::object &map_obj) {
+-+    if (map_obj.contains("buildings")) {
+-+        for (const auto &b_val : map_obj.at("buildings").as_array()) {
+-+            const auto &b_obj = b_val.as_object();
+-+            model::Coord x = b_obj.at("x").as_int64();
+-+            model::Coord y = b_obj.at("y").as_int64();
+-+            model::Dimension w = b_obj.at("w").as_int64();
+-+            model::Dimension h = b_obj.at("h").as_int64();
+-+            map.AddBuilding(model::Building(
+-+                model::Rectangle{model::Point{x, y}, model::Size{w, h}}));
+-+        }
+-+    }
+-+}
+-+
+-+void LoadOffices(model::Map &map, const json::object &map_obj) {
+-+    if (map_obj.contains("offices")) {
+-+        for (const auto &o_val : map_obj.at("offices").as_array()) {
+-+            const auto &o_obj = o_val.as_object();
+-+            std::string o_id = o_obj.at("id").as_string().c_str();
+-+            model::Coord x = o_obj.at("x").as_int64();
+-+            model::Coord y = o_obj.at("y").as_int64();
+-+            model::Dimension ox = o_obj.at("offsetX").as_int64();
+-+            model::Dimension oy = o_obj.at("offsetY").as_int64();
+-+            map.AddOffice(model::Office(model::Office::Id{o_id},
+-+                                        model::Point{x, y},
+-+                                        model::Offset{ox, oy}));
+-+        }
+-+    }
+-+}
+-+
+-+} // namespace
+-+
+-+model::Game LoadGame(const std::filesystem::path &json_path) {
+-     std::ifstream file(json_path);
+-     if (!file.is_open()) {
+--        throw std::runtime_error("Failed to open config file: " + json_path.string());
+-+        throw std::runtime_error("Failed to open config file: " +
+-+                                 json_path.string());
+-     }
+- 
+-     std::stringstream buffer;
+-     buffer << file.rdbuf();
+-     std::string json_str = buffer.str();
+--    auto value = json::parse(json_str);
+-+    json::value value;
+-+    try {
+-+        value = json::parse(json_str);
+-+    } catch (const std::exception &e) {
+-+        throw std::runtime_error("Failed to parse config file: " +
+-+                                 std::string(e.what()));
+-+    }
+-+
+-     model::Game game;
+- 
+--    for (const auto& maps_array = value.as_object().at("maps").as_array();
+--        const auto& map_val : maps_array) {
+--        const auto& map_obj = map_val.as_object();
+-+    for (const auto &maps_array = value.as_object().at("maps").as_array();
+-+         const auto &map_val : maps_array) {
+-+        const auto &map_obj = map_val.as_object();
+- 
+-         std::string id = map_obj.at("id").as_string().c_str();
+-         std::string name = map_obj.at("name").as_string().c_str();
+- 
+-         model::Map map(model::Map::Id{id}, name);
+- 
+--        // region deserialisation
+--        if (map_obj.contains("roads")) {
+--            for (const auto& road_val : map_obj.at("roads").as_array()) {
+--                const auto& road_obj = road_val.as_object();
+--                model::Coord x0 = road_obj.at("x0").as_int64();
+--                model::Coord y0 = road_obj.at("y0").as_int64();
+--
+--                if (road_obj.contains("x1")) {
+--                    model::Coord x1 = road_obj.at("x1").as_int64();
+--                    map.AddRoad(model::Road(model::Road::HORIZONTAL, model::Point{x0, y0}, x1));
+--                } else if (road_obj.contains("y1")) {
+--                    model::Coord y1 = road_obj.at("y1").as_int64();
+--                    map.AddRoad(model::Road(model::Road::VERTICAL, model::Point{x0, y0}, y1));
+--                }
+--            }
+--        }
+--
+--        if (map_obj.contains("buildings")) {
+--            for (const auto& b_val : map_obj.at("buildings").as_array()) {
+--                const auto& b_obj = b_val.as_object();
+--                model::Coord x = b_obj.at("x").as_int64();
+--                model::Coord y = b_obj.at("y").as_int64();
+--                model::Dimension w = b_obj.at("w").as_int64();
+--                model::Dimension h = b_obj.at("h").as_int64();
+--                map.AddBuilding(model::Building(model::Rectangle{model::Point{x, y}, model::Size{w, h}}));
+--            }
+--        }
+--
+--        if (map_obj.contains("offices")) {
+--            for (const auto& o_val : map_obj.at("offices").as_array()) {
+--                const auto& o_obj = o_val.as_object();
+--                std::string o_id = o_obj.at("id").as_string().c_str();
+--                model::Coord x = o_obj.at("x").as_int64();
+--                model::Coord y = o_obj.at("y").as_int64();
+--                model::Dimension ox = o_obj.at("offsetX").as_int64();
+--                model::Dimension oy = o_obj.at("offsetY").as_int64();
+--                map.AddOffice(model::Office(model::Office::Id{o_id}, model::Point{x, y}, model::Offset{ox, oy}));
+--            }
+--        }
+--        // endregion
+-+        LoadRoads(map, map_obj);
+-+        LoadBuildings(map, map_obj);
+-+        LoadOffices(map, map_obj);
+- 
+-         game.AddMap(std::move(map));
+-     }
+-@@ -76,4 +103,4 @@ model::Game LoadGame(const std::filesystem::path& json_path) {
+-     return game;
+- }
+- 
+--}  // namespace json_loader
+-+} // namespace json_loader
+-diff --git a/solution/src/request_handler.h b/solution/src/request_handler.h
+-index b182df8..9675a65 100644
+---- a/solution/src/request_handler.h
+-+++ b/solution/src/request_handler.h
+-@@ -7,64 +7,74 @@
+- namespace http_handler {
+- namespace beast = boost::beast;
+- namespace http = beast::http;
+-+namespace net = boost::asio;
+- namespace json = boost::json;
+- 
+-+namespace api_endpoints {
+-+constexpr std::string_view API_PREFIX = "/api/";
+-+constexpr std::string_view MAPS_API_PREFIX = "/api/v1/maps";
+-+} // namespace api_endpoints
+-+
+- class RequestHandler {
+- public:
+--    explicit RequestHandler(model::Game& game)
+--        : game_{game} {
+--    }
+-+    explicit RequestHandler(model::Game &game) : game_{game} {}
+- 
+--    RequestHandler(const RequestHandler&) = delete;
+--    RequestHandler& operator=(const RequestHandler&) = delete;
+-+    RequestHandler(const RequestHandler &) = delete;
+-+    RequestHandler &operator=(const RequestHandler &) = delete;
+- 
+-     template <typename Body, typename Allocator, typename Send>
+--    void operator()(http::request<Body, http::basic_fields<Allocator>>&& req, Send&& send) {
+-+    void operator()(http::request<Body, http::basic_fields<Allocator>> &&req,
+-+                    Send &&send) {
+- 
+-         if (req.method() != http::verb::get && req.method() != http::verb::head) {
+--            send(MakeErrorResponse(http::status::bad_request, "badRequest", "Invalid method", req.version(), req.keep_alive()));
+-+            send(MakeErrorResponse(http::status::bad_request, "badRequest",
+-+                                     "Invalid method", req.version(),
+-+                                     req.keep_alive()));
+-             return;
+-         }
+- 
+-         const std::string_view target = req.target();
+- 
+--        if (constexpr std::string_view api_prefix = "/api/v1/maps"; target.starts_with(api_prefix)) {
+--            if (target == api_prefix) {
+-+        if (target.starts_with(api_endpoints::MAPS_API_PREFIX)) {
+-+            if (target == api_endpoints::MAPS_API_PREFIX) {
+-                 send(MakeMapsListResponse(req.version(), req.keep_alive()));
+-                 return;
+--            } else if (target[api_prefix.size()] == '/') {
+--                const std::string_view map_id_str = target.substr(api_prefix.size() + 1);
+-+            } else if (target[api_endpoints::MAPS_API_PREFIX.size()] == '/') {
+-+                const std::string_view map_id_str =
+-+                    target.substr(api_endpoints::MAPS_API_PREFIX.size() + 1);
+-                 const model::Map::Id id{std::string(map_id_str)};
+--                const auto* map = game_.FindMap(id);
+-+                const auto *map = game_.FindMap(id);
+- 
+-                 if (!map) {
+--                    send(MakeErrorResponse(http::status::not_found, "mapNotFound", "Map not found", req.version(), req.keep_alive()));
+-+                    send(MakeErrorResponse(http::status::not_found, "mapNotFound",
+-+                                             "Map not found", req.version(),
+-+                                             req.keep_alive()));
+-                     return;
+-                 }
+--                send(MakeMapDescriptionResponse(*map, req.version(), req.keep_alive()));
+-+                send(MakeMapDescriptionResponse(*map, req.version(),
+-+                                                req.keep_alive()));
+-                 return;
+-             }
+-         }
+- 
+--        if (target.starts_with("/api/")) {
+--            send(MakeErrorResponse(http::status::bad_request, "badRequest", "Bad request", req.version(), req.keep_alive()));
+-+        if (target.starts_with(api_endpoints::API_PREFIX)) {
+-+            send(MakeErrorResponse(http::status::bad_request, "badRequest",
+-+                                     "Bad request", req.version(),
+-+                                     req.keep_alive()));
+-             return;
+-         }
+- 
+--        send(MakeErrorResponse(http::status::bad_request, "badRequest", "Bad request", req.version(), req.keep_alive()));
+-+        send(MakeErrorResponse(http::status::bad_request, "badRequest",
+-+                                 "Bad request", req.version(), req.keep_alive()));
+-     }
+- 
+- private:
+--    model::Game& game_;
+-+    model::Game &game_;
+- 
+--    // region helpers
+-     [[nodiscard]] static http::response<http::string_body> MakeErrorResponse(
+--        const http::status status,
+--        const std::string_view code,
+--        const std::string_view message,
+--        const unsigned version,
+--        const bool keep_alive
+--) {
+-+        const http::status status, const std::string_view code,
+-+        const std::string_view message, const unsigned version,
+-+        const bool keep_alive) {
+-         http::response<http::string_body> response(status, version);
+-         response.set(http::field::content_type, "application/json");
+-         response.keep_alive(keep_alive);
+-@@ -78,13 +88,14 @@ private:
+-         return response;
+-     }
+- 
+--    [[nodiscard]] http::response<http::string_body> MakeMapsListResponse(const unsigned version, const bool keep_alive) const {
+-+    [[nodiscard]] http::response<http::string_body>
+-+    MakeMapsListResponse(const unsigned version, const bool keep_alive) const {
+-         http::response<http::string_body> response(http::status::ok, version);
+-         response.set(http::field::content_type, "application/json");
+-         response.keep_alive(keep_alive);
+- 
+-         json::array maps_arr;
+--        for (const auto& map : game_.GetMaps()) {
+-+        for (const auto &map : game_.GetMaps()) {
+-             json::object map_obj;
+-             map_obj["id"] = *map.GetId();
+-             map_obj["name"] = map.GetName();
+-@@ -96,17 +107,9 @@ private:
+-         return response;
+-     }
+- 
+--    [[nodiscard]] static http::response<http::string_body> MakeMapDescriptionResponse(const model::Map& map, const unsigned version, const bool keep_alive) {
+--        http::response<http::string_body> response(http::status::ok, version);
+--        response.set(http::field::content_type, "application/json");
+--        response.keep_alive(keep_alive);
+--
+--        json::object map_obj;
+--        map_obj["id"] = *map.GetId();
+--        map_obj["name"] = map.GetName();
+--
+-+    [[nodiscard]] static json::array GetRoadsAsJson(const model::Map &map) {
+-         json::array roads_arr;
+--        for (const auto& road : map.GetRoads()) {
+-+        for (const auto &road : map.GetRoads()) {
+-             json::object road_obj;
+-             road_obj["x0"] = road.GetStart().x;
+-             road_obj["y0"] = road.GetStart().y;
+-@@ -117,10 +120,12 @@ private:
+-             }
+-             roads_arr.push_back(road_obj);
+-         }
+--        map_obj["roads"] = roads_arr;
+-+        return roads_arr;
+-+    }
+- 
+-+    [[nodiscard]] static json::array GetBuildingsAsJson(const model::Map &map) {
+-         json::array buildings_arr;
+--        for (const auto& b : map.GetBuildings()) {
+-+        for (const auto &b : map.GetBuildings()) {
+-             json::object b_obj;
+-             b_obj["x"] = b.GetBounds().position.x;
+-             b_obj["y"] = b.GetBounds().position.y;
+-@@ -128,10 +133,12 @@ private:
+-             b_obj["h"] = b.GetBounds().size.height;
+-             buildings_arr.push_back(b_obj);
+-         }
+--        map_obj["buildings"] = buildings_arr;
+-+        return buildings_arr;
+-+    }
+- 
+-+    [[nodiscard]] static json::array GetOfficesAsJson(const model::Map &map) {
+-         json::array offices_arr;
+--        for (const auto& office : map.GetOffices()) {
+-+        for (const auto &office : map.GetOffices()) {
+-             json::object o_obj;
+-             o_obj["id"] = *office.GetId();
+-             o_obj["x"] = office.GetPosition().x;
+-@@ -140,13 +147,27 @@ private:
+-             o_obj["offsetY"] = office.GetOffset().dy;
+-             offices_arr.push_back(o_obj);
+-         }
+--        map_obj["offices"] = offices_arr;
+-+        return offices_arr;
+-+    }
+-+
+-+    [[nodiscard]] static http::response<http::string_body>
+-+    MakeMapDescriptionResponse(const model::Map &map, const unsigned version,
+-+                               const bool keep_alive) {
+-+        http::response<http::string_body> response(http::status::ok, version);
+-+        response.set(http::field::content_type, "application/json");
+-+        response.keep_alive(keep_alive);
+-+
+-+        json::object map_obj;
+-+        map_obj["id"] = *map.GetId();
+-+        map_obj["name"] = map.GetName();
+-+        map_obj["roads"] = GetRoadsAsJson(map);
+-+        map_obj["buildings"] = GetBuildingsAsJson(map);
+-+        map_obj["offices"] = GetOfficesAsJson(map);
+- 
+-         response.body() = json::serialize(map_obj);
+-         response.prepare_payload();
+-         return response;
+-     }
+--    // endregion
+- };
+- 
+--}  // namespace http_handler
+-+} // namespace http_handler
+diff --git a/hello/CMakeLists.txt b/hello/CMakeLists.txt
+index c79c758..fa2f393 100644
+--- a/hello/CMakeLists.txt
++++ b/hello/CMakeLists.txt
+@@ -23,6 +23,7 @@ add_executable(hamburger src/hamburger.cpp)
+ add_executable(sync_sample src/sync_sample.cpp)
+ add_executable(async_server src/async_server_notes.cpp)
+ add_executable(boost_fs src/boost_fs.cpp)
++add_executable(logger src/logger.cpp)
  
- add_executable(game_server
--	src/main.cpp
--	src/http_server.cpp
--	src/http_server.h
--	src/sdk.h
--	src/model.h
--	src/model.cpp
--	src/tagged.h
--	src/boost_json.cpp
--	src/json_loader.h
--	src/json_loader.cpp
--	src/request_handler.cpp
--	src/request_handler.h
-+    src/main.cpp
-+    src/http_server.cpp
-+    src/http_server.h
-+    src/sdk.h
-+    src/model.h
-+    src/model.cpp
-+    src/tagged.h
-+    src/boost_json.cpp
-+    src/json_loader.h
-+    src/json_loader.cpp
-+    src/request_handler.h
- )
- target_link_libraries(game_server PRIVATE Threads::Threads)
-diff --git a/solution/conanfile.txt b/solution/conanfile.txt
-index 2c6fad0..c8f1a5a 100644
---- a/solution/conanfile.txt
-+++ b/solution/conanfile.txt
-@@ -3,3 +3,4 @@ boost/1.78.0
- 
- [generators]
- cmake
-+CMakeToolchain
-diff --git a/solution/src/http_server.cpp b/solution/src/http_server.cpp
-index 4a60ed3..720bb1c 100644
---- a/solution/src/http_server.cpp
-+++ b/solution/src/http_server.cpp
-@@ -30,7 +30,10 @@ void SessionBase::OnRead(const boost::system::error_code &ec, size_t bytes_read)
- 
- void SessionBase::Close() {
-     boost::system::error_code ec;
--    stream_.socket().shutdown(tcp::socket::shutdown_send, ec); // NOLINT(*-unused-return-value)
-+    stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
-+    if (ec) {
-+        return ReportError(ec, "shutdown");
+ target_link_libraries(hello PRIVATE Threads::Threads)
+ target_link_libraries(sync_sample PRIVATE Threads::Threads)
+diff --git a/hello/src/logger.cpp b/hello/src/logger.cpp
+index 69c928c..93c56c0 100644
+--- a/hello/src/logger.cpp
++++ b/hello/src/logger.cpp
+@@ -1,3 +1,48 @@
+ //
+ // Created by raaveinm on 7/12/26.
+ //
++
++#include <chrono>
++#include <fstream>
++#include <iomanip>
++#include <iostream>
++#include <syncstream>
++#include <string>
++
++class Logger {
++    static auto GetTimeStamp() {
++        const auto time_point = std::chrono::system_clock::now();
++        const auto time_t_time = std::chrono::system_clock::to_time_t(time_point);
++        return std::put_time(std::gmtime(&time_t_time), "%Y-%m-%d %H:%M:%S");
 +    }
- }
++
++public:
++    Logger() = default;
++
++    template<typename T>
++    void Log(const T& message) {
++        std::osyncstream sync_stream(log_file_);
++        sync_stream << GetTimeStamp() << ": ";
++        sync_stream << message;
++        sync_stream << std::endl;
++    }
++
++private:
++    std::ofstream log_file_{"sample.txt"};
++};
++
++int main() {
++    Logger log;
++    log.Log("Program started");
++
++    int x, y;
++    std::cout << "Enter x and y: ";
++    std::cin >> x >> y;
++    log.Log("User entered numbers " + std::to_string(x) + " and " + std::to_string(y));
++
++    int sum = x + y;
++    std::cout << "The sum of x and y is " << sum << std::endl;
++
++    log.Log("The sum " + std::to_string(sum) + " is computed");
++    return 0;
++};
+\ No newline at end of file
+diff --git a/sprint2/problems/logger/solution/CMakeLists.txt b/sprint2/problems/logger/solution/CMakeLists.txt
+index 3bd2aa8..3570fe4 100644
+--- a/sprint2/problems/logger/solution/CMakeLists.txt
++++ b/sprint2/problems/logger/solution/CMakeLists.txt
+@@ -1,6 +1,15 @@
+ cmake_minimum_required(VERSION 3.9)
+ project(HelloLog CXX)
+-set(CMAKE_CXX_STANDARD 20)
++set(CMAKE_CXX_STANDARD 23)
++
++set(CONAN_SETUP_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../../../../conan_clion_setup.cmake)
++
++if (EXISTS ${CONAN_SETUP_FILE})
++    include(${CONAN_SETUP_FILE})
++else ()
++    message("conan_clion_setup not found, skipping")
++endif ()
++
  
- void SessionBase::Write(http::response<http::string_body> &&response) {
-diff --git a/solution/src/json_loader.cpp b/solution/src/json_loader.cpp
-index 8a5d1b8..c596d8c 100644
---- a/solution/src/json_loader.cpp
-+++ b/solution/src/json_loader.cpp
-@@ -1,6 +1,7 @@
- #include "json_loader.h"
- #include <boost/json.hpp>
+ # обратите внимание на аргумент TARGETS у команды conan_basic_setup
+ include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
+diff --git a/sprint2/problems/logger/solution/README.md b/sprint2/problems/logger/solution/README.md
+index 295c3b1..ef53b25 100644
+--- a/sprint2/problems/logger/solution/README.md
++++ b/sprint2/problems/logger/solution/README.md
+@@ -1 +1,24 @@
+-Разместите в этой папке решение задачи
+\ No newline at end of file
++# VARIADIC TEMPLATE LOGGER
++
++> Logger signature:
++> ```C++
++> Logger::GetInstance().Log("User entered numbers "sv, x, " and "sv, y);
++> ```
++
++## Description
++
++Logger get variable amount of arguments and each of it will be written to the log file. 
++
++For each argument must exist operator `<<`.
++
++Logs has the following format: `YYYY-MM-DD HH:MM:SS: arg1 arg2`
++
++## Testing
++
++Method `SetTimestamp(std::chrono::system_clock::time_point timestamp)` is accepting time stamp and use its time in `Log(..)`
++instead of `system_clock::now()`
++
++## Output
++
++Logger provides its output to `/var/log/sample_log_$YYYY_$MM_$DD.log`. If during runtime date has been changed - Logger will
++write following logs to the new file.
+\ No newline at end of file
+diff --git a/sprint2/problems/logger/solution/main.cpp b/sprint2/problems/logger/solution/main.cpp
+index e9d4acb..c961982 100644
+--- a/sprint2/problems/logger/solution/main.cpp
++++ b/sprint2/problems/logger/solution/main.cpp
+@@ -1,4 +1,4 @@
+-#include "../precode/my_logger.h"
++#include "../solution/my_logger.h"
+ 
+ #include <string_view>
+ #include <thread>
+@@ -22,9 +22,9 @@ int main() {
+     LOG("Brilliant logger.", " ", "I Love it");
+ 
+     // Выполним ещё 100000 логирований.
+-    static const int attempts = 100000;
++    static constexpr int attempts = 100000;
+     for(int i = 0; i < attempts; ++i) {
+-        std::chrono::system_clock::time_point ts(std::chrono::seconds(10000000 + i * 100));
++        const std::chrono::system_clock::time_point ts(std::chrono::seconds(10000000 + i * 100));
+         Logger::GetInstance().SetTimestamp(ts);
+ 
+         LOG("Logging attempt ", i, ". ", "I Love it");
+diff --git a/sprint2/problems/logger/solution/my_logger.h b/sprint2/problems/logger/solution/my_logger.h
+index 76fa60f..668ed26 100644
+--- a/sprint2/problems/logger/solution/my_logger.h
++++ b/sprint2/problems/logger/solution/my_logger.h
+@@ -3,6 +3,7 @@
+ #include <chrono>
+ #include <iomanip>
  #include <fstream>
 +#include <iostream>
  #include <sstream>
  #include <string>
- 
-@@ -8,67 +9,93 @@ namespace json = boost::json;
- 
- namespace json_loader {
- 
--model::Game LoadGame(const std::filesystem::path& json_path) {
-+namespace {
-+
-+void LoadRoads(model::Map &map, const json::object &map_obj) {
-+    if (map_obj.contains("roads")) {
-+        for (const auto &road_val : map_obj.at("roads").as_array()) {
-+            const auto &road_obj = road_val.as_object();
-+            model::Coord x0 = road_obj.at("x0").as_int64();
-+            model::Coord y0 = road_obj.at("y0").as_int64();
-+
-+            if (road_obj.contains("x1")) {
-+                model::Coord x1 = road_obj.at("x1").as_int64();
-+                map.AddRoad(
-+                    model::Road(model::Road::HORIZONTAL, model::Point{x0, y0},
-+                                x1));
-+            } else if (road_obj.contains("y1")) {
-+                model::Coord y1 = road_obj.at("y1").as_int64();
-+                map.AddRoad(
-+                    model::Road(model::Road::VERTICAL, model::Point{x0, y0}, y1));
-+            }
-+        }
-+    }
-+}
-+
-+void LoadBuildings(model::Map &map, const json::object &map_obj) {
-+    if (map_obj.contains("buildings")) {
-+        for (const auto &b_val : map_obj.at("buildings").as_array()) {
-+            const auto &b_obj = b_val.as_object();
-+            model::Coord x = b_obj.at("x").as_int64();
-+            model::Coord y = b_obj.at("y").as_int64();
-+            model::Dimension w = b_obj.at("w").as_int64();
-+            model::Dimension h = b_obj.at("h").as_int64();
-+            map.AddBuilding(model::Building(
-+                model::Rectangle{model::Point{x, y}, model::Size{w, h}}));
-+        }
-+    }
-+}
-+
-+void LoadOffices(model::Map &map, const json::object &map_obj) {
-+    if (map_obj.contains("offices")) {
-+        for (const auto &o_val : map_obj.at("offices").as_array()) {
-+            const auto &o_obj = o_val.as_object();
-+            std::string o_id = o_obj.at("id").as_string().c_str();
-+            model::Coord x = o_obj.at("x").as_int64();
-+            model::Coord y = o_obj.at("y").as_int64();
-+            model::Dimension ox = o_obj.at("offsetX").as_int64();
-+            model::Dimension oy = o_obj.at("offsetY").as_int64();
-+            map.AddOffice(model::Office(model::Office::Id{o_id},
-+                                        model::Point{x, y},
-+                                        model::Offset{ox, oy}));
-+        }
-+    }
-+}
-+
-+} // namespace
-+
-+model::Game LoadGame(const std::filesystem::path &json_path) {
-     std::ifstream file(json_path);
-     if (!file.is_open()) {
--        throw std::runtime_error("Failed to open config file: " + json_path.string());
-+        throw std::runtime_error("Failed to open config file: " +
-+                                 json_path.string());
+ #include <string_view>
+@@ -23,14 +24,23 @@ class Logger {
+         return std::chrono::system_clock::now();
      }
  
-     std::stringstream buffer;
-     buffer << file.rdbuf();
-     std::string json_str = buffer.str();
--    auto value = json::parse(json_str);
-+    json::value value;
-+    try {
-+        value = json::parse(json_str);
-+    } catch (const std::exception &e) {
-+        throw std::runtime_error("Failed to parse config file: " +
-+                                 std::string(e.what()));
+-    auto GetTimeStamp() const {
++    std::string GetTimeStamp() const {
+         const auto now = GetTime();
+         const auto t_c = std::chrono::system_clock::to_time_t(now);
+-        return std::put_time(std::localtime(&t_c), "%F %T");
++        const std::tm* local_time = std::localtime(&t_c);
++        std::stringstream ss;
++        ss << std::put_time(local_time, "%Y-%m-%d %H:%M:%S");
++        return ss.str();
+     }
+ 
+-    // Для имени файла возьмите дату с форматом "%Y_%m_%d"
+-    std::string GetFileTimeStamp() const;
++    [[nodiscard]] std::string GetFileTimeStamp() const {
++        const std::chrono::time_point<std::chrono::system_clock> now = GetTime();
++        const std::time_t t_c = std::chrono::system_clock::to_time_t(now);
++        const std::tm* local_time = std::localtime(&t_c);
++        std::stringstream ss;
++        ss << std::put_time(local_time, "%Y_%m_%d");
++        return ss.str();
++    }
+ 
+     Logger() = default;
+     Logger(const Logger&) = delete;
+@@ -43,13 +53,27 @@ public:
+ 
+     // Выведите в поток все аргументы.
+     template<class... Ts>
+-    void Log(const Ts&... args);
++    void Log(const Ts&... args) {
++        std::lock_guard lock(mutex_);
++        const std::string path = "/var/log/sample_log_" + GetFileTimeStamp() + ".log";
++        try {
++            std::ofstream file(path, std::ios::app);
++            if (!file.is_open()) throw std::runtime_error("Could not open file.");
++            file << GetTimeStamp() << ": ";
++            (file << ... << args);
++            file << "\n";
+ 
+-    // Установите manual_ts_. Учтите, что эта операция может выполняться
+-    // параллельно с выводом в поток, вам нужно предусмотреть 
+-    // синхронизацию.
+-    void SetTimestamp(std::chrono::system_clock::time_point ts);
++        } catch (const std::exception &e) {
++            std::cerr << e.what() << std::endl;
++        }
 +    }
 +
-     model::Game game;
- 
--    for (const auto& maps_array = value.as_object().at("maps").as_array();
--        const auto& map_val : maps_array) {
--        const auto& map_obj = map_val.as_object();
-+    for (const auto &maps_array = value.as_object().at("maps").as_array();
-+         const auto &map_val : maps_array) {
-+        const auto &map_obj = map_val.as_object();
- 
-         std::string id = map_obj.at("id").as_string().c_str();
-         std::string name = map_obj.at("name").as_string().c_str();
- 
-         model::Map map(model::Map::Id{id}, name);
- 
--        // region deserialisation
--        if (map_obj.contains("roads")) {
--            for (const auto& road_val : map_obj.at("roads").as_array()) {
--                const auto& road_obj = road_val.as_object();
--                model::Coord x0 = road_obj.at("x0").as_int64();
--                model::Coord y0 = road_obj.at("y0").as_int64();
--
--                if (road_obj.contains("x1")) {
--                    model::Coord x1 = road_obj.at("x1").as_int64();
--                    map.AddRoad(model::Road(model::Road::HORIZONTAL, model::Point{x0, y0}, x1));
--                } else if (road_obj.contains("y1")) {
--                    model::Coord y1 = road_obj.at("y1").as_int64();
--                    map.AddRoad(model::Road(model::Road::VERTICAL, model::Point{x0, y0}, y1));
--                }
--            }
--        }
--
--        if (map_obj.contains("buildings")) {
--            for (const auto& b_val : map_obj.at("buildings").as_array()) {
--                const auto& b_obj = b_val.as_object();
--                model::Coord x = b_obj.at("x").as_int64();
--                model::Coord y = b_obj.at("y").as_int64();
--                model::Dimension w = b_obj.at("w").as_int64();
--                model::Dimension h = b_obj.at("h").as_int64();
--                map.AddBuilding(model::Building(model::Rectangle{model::Point{x, y}, model::Size{w, h}}));
--            }
--        }
--
--        if (map_obj.contains("offices")) {
--            for (const auto& o_val : map_obj.at("offices").as_array()) {
--                const auto& o_obj = o_val.as_object();
--                std::string o_id = o_obj.at("id").as_string().c_str();
--                model::Coord x = o_obj.at("x").as_int64();
--                model::Coord y = o_obj.at("y").as_int64();
--                model::Dimension ox = o_obj.at("offsetX").as_int64();
--                model::Dimension oy = o_obj.at("offsetY").as_int64();
--                map.AddOffice(model::Office(model::Office::Id{o_id}, model::Point{x, y}, model::Offset{ox, oy}));
--            }
--        }
--        // endregion
-+        LoadRoads(map, map_obj);
-+        LoadBuildings(map, map_obj);
-+        LoadOffices(map, map_obj);
- 
-         game.AddMap(std::move(map));
-     }
-@@ -76,4 +103,4 @@ model::Game LoadGame(const std::filesystem::path& json_path) {
-     return game;
- }
- 
--}  // namespace json_loader
-+} // namespace json_loader
-diff --git a/solution/src/request_handler.h b/solution/src/request_handler.h
-index b182df8..9675a65 100644
---- a/solution/src/request_handler.h
-+++ b/solution/src/request_handler.h
-@@ -7,64 +7,74 @@
- namespace http_handler {
- namespace beast = boost::beast;
- namespace http = beast::http;
-+namespace net = boost::asio;
- namespace json = boost::json;
- 
-+namespace api_endpoints {
-+constexpr std::string_view API_PREFIX = "/api/";
-+constexpr std::string_view MAPS_API_PREFIX = "/api/v1/maps";
-+} // namespace api_endpoints
-+
- class RequestHandler {
- public:
--    explicit RequestHandler(model::Game& game)
--        : game_{game} {
--    }
-+    explicit RequestHandler(model::Game &game) : game_{game} {}
- 
--    RequestHandler(const RequestHandler&) = delete;
--    RequestHandler& operator=(const RequestHandler&) = delete;
-+    RequestHandler(const RequestHandler &) = delete;
-+    RequestHandler &operator=(const RequestHandler &) = delete;
- 
-     template <typename Body, typename Allocator, typename Send>
--    void operator()(http::request<Body, http::basic_fields<Allocator>>&& req, Send&& send) {
-+    void operator()(http::request<Body, http::basic_fields<Allocator>> &&req,
-+                    Send &&send) {
- 
-         if (req.method() != http::verb::get && req.method() != http::verb::head) {
--            send(MakeErrorResponse(http::status::bad_request, "badRequest", "Invalid method", req.version(), req.keep_alive()));
-+            send(MakeErrorResponse(http::status::bad_request, "badRequest",
-+                                     "Invalid method", req.version(),
-+                                     req.keep_alive()));
-             return;
-         }
- 
-         const std::string_view target = req.target();
- 
--        if (constexpr std::string_view api_prefix = "/api/v1/maps"; target.starts_with(api_prefix)) {
--            if (target == api_prefix) {
-+        if (target.starts_with(api_endpoints::MAPS_API_PREFIX)) {
-+            if (target == api_endpoints::MAPS_API_PREFIX) {
-                 send(MakeMapsListResponse(req.version(), req.keep_alive()));
-                 return;
--            } else if (target[api_prefix.size()] == '/') {
--                const std::string_view map_id_str = target.substr(api_prefix.size() + 1);
-+            } else if (target[api_endpoints::MAPS_API_PREFIX.size()] == '/') {
-+                const std::string_view map_id_str =
-+                    target.substr(api_endpoints::MAPS_API_PREFIX.size() + 1);
-                 const model::Map::Id id{std::string(map_id_str)};
--                const auto* map = game_.FindMap(id);
-+                const auto *map = game_.FindMap(id);
- 
-                 if (!map) {
--                    send(MakeErrorResponse(http::status::not_found, "mapNotFound", "Map not found", req.version(), req.keep_alive()));
-+                    send(MakeErrorResponse(http::status::not_found, "mapNotFound",
-+                                             "Map not found", req.version(),
-+                                             req.keep_alive()));
-                     return;
-                 }
--                send(MakeMapDescriptionResponse(*map, req.version(), req.keep_alive()));
-+                send(MakeMapDescriptionResponse(*map, req.version(),
-+                                                req.keep_alive()));
-                 return;
-             }
-         }
- 
--        if (target.starts_with("/api/")) {
--            send(MakeErrorResponse(http::status::bad_request, "badRequest", "Bad request", req.version(), req.keep_alive()));
-+        if (target.starts_with(api_endpoints::API_PREFIX)) {
-+            send(MakeErrorResponse(http::status::bad_request, "badRequest",
-+                                     "Bad request", req.version(),
-+                                     req.keep_alive()));
-             return;
-         }
- 
--        send(MakeErrorResponse(http::status::bad_request, "badRequest", "Bad request", req.version(), req.keep_alive()));
-+        send(MakeErrorResponse(http::status::bad_request, "badRequest",
-+                                 "Bad request", req.version(), req.keep_alive()));
-     }
++    void SetTimestamp(std::chrono::system_clock::time_point ts) {
++        std::lock_guard lock(mutex_);
++        manual_ts_ = ts;
++    }
  
  private:
--    model::Game& game_;
-+    model::Game &game_;
- 
--    // region helpers
-     [[nodiscard]] static http::response<http::string_body> MakeErrorResponse(
--        const http::status status,
--        const std::string_view code,
--        const std::string_view message,
--        const unsigned version,
--        const bool keep_alive
--) {
-+        const http::status status, const std::string_view code,
-+        const std::string_view message, const unsigned version,
-+        const bool keep_alive) {
-         http::response<http::string_body> response(status, version);
-         response.set(http::field::content_type, "application/json");
-         response.keep_alive(keep_alive);
-@@ -78,13 +88,14 @@ private:
-         return response;
-     }
- 
--    [[nodiscard]] http::response<http::string_body> MakeMapsListResponse(const unsigned version, const bool keep_alive) const {
-+    [[nodiscard]] http::response<http::string_body>
-+    MakeMapsListResponse(const unsigned version, const bool keep_alive) const {
-         http::response<http::string_body> response(http::status::ok, version);
-         response.set(http::field::content_type, "application/json");
-         response.keep_alive(keep_alive);
- 
-         json::array maps_arr;
--        for (const auto& map : game_.GetMaps()) {
-+        for (const auto &map : game_.GetMaps()) {
-             json::object map_obj;
-             map_obj["id"] = *map.GetId();
-             map_obj["name"] = map.GetName();
-@@ -96,17 +107,9 @@ private:
-         return response;
-     }
- 
--    [[nodiscard]] static http::response<http::string_body> MakeMapDescriptionResponse(const model::Map& map, const unsigned version, const bool keep_alive) {
--        http::response<http::string_body> response(http::status::ok, version);
--        response.set(http::field::content_type, "application/json");
--        response.keep_alive(keep_alive);
--
--        json::object map_obj;
--        map_obj["id"] = *map.GetId();
--        map_obj["name"] = map.GetName();
--
-+    [[nodiscard]] static json::array GetRoadsAsJson(const model::Map &map) {
-         json::array roads_arr;
--        for (const auto& road : map.GetRoads()) {
-+        for (const auto &road : map.GetRoads()) {
-             json::object road_obj;
-             road_obj["x0"] = road.GetStart().x;
-             road_obj["y0"] = road.GetStart().y;
-@@ -117,10 +120,12 @@ private:
-             }
-             roads_arr.push_back(road_obj);
-         }
--        map_obj["roads"] = roads_arr;
-+        return roads_arr;
-+    }
- 
-+    [[nodiscard]] static json::array GetBuildingsAsJson(const model::Map &map) {
-         json::array buildings_arr;
--        for (const auto& b : map.GetBuildings()) {
-+        for (const auto &b : map.GetBuildings()) {
-             json::object b_obj;
-             b_obj["x"] = b.GetBounds().position.x;
-             b_obj["y"] = b.GetBounds().position.y;
-@@ -128,10 +133,12 @@ private:
-             b_obj["h"] = b.GetBounds().size.height;
-             buildings_arr.push_back(b_obj);
-         }
--        map_obj["buildings"] = buildings_arr;
-+        return buildings_arr;
-+    }
- 
-+    [[nodiscard]] static json::array GetOfficesAsJson(const model::Map &map) {
-         json::array offices_arr;
--        for (const auto& office : map.GetOffices()) {
-+        for (const auto &office : map.GetOffices()) {
-             json::object o_obj;
-             o_obj["id"] = *office.GetId();
-             o_obj["x"] = office.GetPosition().x;
-@@ -140,13 +147,27 @@ private:
-             o_obj["offsetY"] = office.GetOffset().dy;
-             offices_arr.push_back(o_obj);
-         }
--        map_obj["offices"] = offices_arr;
-+        return offices_arr;
-+    }
-+
-+    [[nodiscard]] static http::response<http::string_body>
-+    MakeMapDescriptionResponse(const model::Map &map, const unsigned version,
-+                               const bool keep_alive) {
-+        http::response<http::string_body> response(http::status::ok, version);
-+        response.set(http::field::content_type, "application/json");
-+        response.keep_alive(keep_alive);
-+
-+        json::object map_obj;
-+        map_obj["id"] = *map.GetId();
-+        map_obj["name"] = map.GetName();
-+        map_obj["roads"] = GetRoadsAsJson(map);
-+        map_obj["buildings"] = GetBuildingsAsJson(map);
-+        map_obj["offices"] = GetOfficesAsJson(map);
- 
-         response.body() = json::serialize(map_obj);
-         response.prepare_payload();
-         return response;
-     }
--    // endregion
+     std::optional<std::chrono::system_clock::time_point> manual_ts_;
++    std::mutex mutex_;
  };
- 
--}  // namespace http_handler
-+} // namespace http_handler
