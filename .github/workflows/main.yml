@@ -99,16 +99,27 @@ jobs:
         with:
           submodules: true
 
+      - name: Setup python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
       - name: Install dependencies
         run: |
+          python -m venv .venv
+          source .venv/bin/activate
           pip uninstall conan -y
           pip install -U conan==1.59.0
+          pip install -r requirements.txt
           cp -R /home/forconan/.conan /github/home/.conan
 
       - name: run tests sprint2 static_content
         run: |
           cd cpp-backend-tests-practicum/scripts/sprint2
           ./static_content/run.sh
+          
+      - name: Create reference directory for logger test
+        run: mkdir -p cpp-backend-tests-practicum/tests/cpp/test_s02_logger/reference
 
       - name: run tests sprint2 logger
         run: |
