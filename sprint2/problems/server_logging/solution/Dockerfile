@@ -31,5 +31,6 @@ WORKDIR /app
 
 COPY --from=build /app/build/game_server .
 COPY ./data ./data
+COPY ./static ./static
 
-ENTRYPOINT ["./game_server", "./data/config.json"]
+ENTRYPOINT ["./game_server", "./data/config.json", "./static"]
