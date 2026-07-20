@@ -9,14 +9,16 @@ RUN apt update && \
     && \
     pip3 install conan==1.*
 
-COPY conanfile.txt /app/
-RUN mkdir /app/build && cd /app/build && \
+WORKDIR /app
+
+COPY conanfile.txt .
+RUN mkdir build && cd build && \
     conan install .. --build=missing
 
-COPY ./src /app/src
-COPY CMakeLists.txt /app/
+COPY ./src ./src
+COPY CMakeLists.txt .
 
-RUN cd /app/build && \
+RUN cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake -DCMAKE_POLICY_DEFAULT_CMP0091=NEW && \
     cmake --build .
 
@@ -25,9 +27,9 @@ FROM ubuntu:22.04 as run
 RUN groupadd -r www && useradd -r -g www www
 USER www
 
-COPY --from=build /app/build/bin/game_server /app/
-COPY ./data /app/data
+WORKDIR /app
 
+COPY --from=build /app/build/game_server .
+COPY ./data ./data
 
-
-ENTRYPOINT ["/app/game_server", "/app/data/config.json"]
+ENTRYPOINT ["./game_server", "./data/config.json"]
