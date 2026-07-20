@@ -1,8 +1,10 @@
-cmake_minimum_required(VERSION 3.11)
+cmake_minimum_required(VERSION 3.15)
 
 project(game_server CXX)
 set(CMAKE_CXX_STANDARD 20)
 
+set(Boost_NO_BOOST_CMAKE OFF)
+set(Boost_NO_SYSTEM_PATHS ON)
 set(CONAN_SETUP_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../../../../conan_clion_setup.cmake)
 
 if (EXISTS ${CONAN_SETUP_FILE})
@@ -11,7 +13,9 @@ else ()
 	message("conan_clion_setup not found, skipping")
 endif ()
 
-find_package(Boost 1.84.0 REQUIRED COMPONENTS log log_setup json filesystem date_time)
+list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
+
+find_package(Boost REQUIRED)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -34,10 +38,8 @@ add_executable(game_server
 )
 
 target_link_libraries(game_server PRIVATE
-    Threads::Threads
-    Boost::log
-    Boost::log_setup
-    Boost::json
-    Boost::filesystem
-    Boost::date_time
+		Threads::Threads
+		Boost::log_setup
+		Boost::log
+		boost::boost
 )

@@ -2,7 +2,8 @@
 #include "sdk.h"
 #define BOOST_BEAST_USE_STD_STRING_VIEW
 
-#include <iostream>
+#include "logging.h"
+
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -10,17 +11,20 @@
 #include <memory>
 #include <utility>
 
-#include "logging.h"
+#include <boost/json.hpp>
+#include <boost/log/utility/manipulators/add_value.hpp>
 
 namespace http_server {
 
-inline void ReportError(const boost::beast::error_code &ec, const std::string_view what) {
-    json::value error_data = {
-        {"code", ec.value()},
-        {"text", ec.message()},
-        {"where", std::string(what)}
-    };
-    BOOST_LOG_TRIVIAL(info) << logging::add_value(additional_data, error_data) << "error";
+using namespace std::literals;
+namespace json = boost::json;
+
+inline void ReportError(const boost::beast::error_code& ec, std::string_view what) {
+    json::object data;
+    data["code"] = ec.value();
+    data["text"] = ec.message();
+    data["where"] = what.data();
+    BOOST_LOG_TRIVIAL(error) << boost::log::add_value("AdditionalData", data) << "error"sv;
 }
 
 namespace net = boost::asio;
@@ -43,7 +47,7 @@ public:
     SessionBase& operator=(const SessionBase&) = delete;
     void Run();
 
-protected:
+private:
     void Read();
     void OnRead(const boost::system::error_code &ec, std::size_t bytes_read);
     void Close();
@@ -51,6 +55,12 @@ protected:
     virtual void HandleRequest(HttpRequest &&request) = 0;
     virtual std::shared_ptr<SessionBase> GetSharedThis() = 0;
 
+protected:
+    beast::tcp_stream& Stream() {
+        return stream_;
+    }
+
+private:
     beast::tcp_stream stream_;
     beast::flat_buffer buffer_;
     HttpRequest request_;
@@ -67,10 +77,9 @@ public:
 
 private:
     void HandleRequest(HttpRequest&& request) override {
-        auto remote_ip = stream_.socket().remote_endpoint().address().to_string();
-        request_handler_(std::move(request), [self = this->shared_from_this()](auto&& response) {
+        request_handler_(std::move(request), Stream().socket().remote_endpoint(), [self = this->shared_from_this()](auto&& response) {
             self->Write(std::move(response));
-        }, remote_ip);
+        });
     }
 
     std::shared_ptr<SessionBase> GetSharedThis() override {
@@ -125,4 +134,4 @@ template <typename RequestHandler>
 void ServeHttp(net::io_context& ioc, const tcp::endpoint& endpoint, RequestHandler&& handler) {
     std::make_shared<Listener<RequestHandler>>(ioc, endpoint, std::forward<RequestHandler>(handler))->Run();
 }
-}
+}  // namespace http_server

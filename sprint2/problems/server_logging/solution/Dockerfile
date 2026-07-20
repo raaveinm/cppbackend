@@ -17,17 +17,19 @@ COPY ./src /app/src
 COPY CMakeLists.txt /app/
 
 RUN cd /app/build && \
-    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    cmake -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release .. && \
     cmake --build .
 
 FROM ubuntu:22.04 as run
 
 RUN groupadd -r www && useradd -r -g www www
+
+COPY --chown=www:www --from=build /app/build/game_server /app/
+COPY --chown=www:www ./data /app/data
+COPY --chown=www:www ./static /app/static
+
 USER www
 
-COPY --from=build /app/build/bin/game_server /app/
-COPY ./data /app/data
+EXPOSE 8080
 
-
-
-ENTRYPOINT ["/app/game_server", "/app/data/config.json"]
+ENTRYPOINT ["/app/game_server", "/app/data/config.json", "/app/static"]
