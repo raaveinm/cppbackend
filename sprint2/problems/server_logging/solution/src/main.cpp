@@ -77,7 +77,7 @@ int main(int argc, const char* argv[]) {
             json::object data;
             data["port"] = port;
             data["address"] = address.to_string();
-            BOOST_LOG_TRIVIAL(info) << boost::log::add_value("AdditionalData", data) << "server started"sv;
+            BOOST_LOG_TRIVIAL(info) << boost::log::add_value("AdditionalData", json::value(data)) << "server started"sv;
         }
 
         RunWorkers(std::max(1u, num_threads), [&ioc] {
@@ -87,14 +87,14 @@ int main(int argc, const char* argv[]) {
         {
             json::object data;
             data["code"] = 0;
-            BOOST_LOG_TRIVIAL(info) << boost::log::add_value("AdditionalData", data) << "server exited"sv;
+            BOOST_LOG_TRIVIAL(info) << boost::log::add_value("AdditionalData", json::value(data)) << "server exited"sv;
         }
 
     } catch (const std::exception& ex) {
         json::object data;
         data["code"] = EXIT_FAILURE;
         data["exception"] = ex.what();
-        BOOST_LOG_TRIVIAL(fatal) << boost::log::add_value("AdditionalData", data) << "server exited"sv;
+        BOOST_LOG_TRIVIAL(fatal) << boost::log::add_value("AdditionalData", json::value(data)) << "server exited"sv;
         return EXIT_FAILURE;
     }
 

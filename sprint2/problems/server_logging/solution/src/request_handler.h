@@ -53,7 +53,7 @@ namespace http_handler {
             data["ip"] = endpoint.address().to_string();
             data["URI"] = std::string(req.target());
             data["method"] = std::string(req.method_string());
-            BOOST_LOG_TRIVIAL(info) << boost::log::add_value("AdditionalData", data) << "request received"sv;
+            BOOST_LOG_TRIVIAL(info) << boost::log::add_value("AdditionalData", json::value(data)) << "request received"sv;
         }
 
         template <typename Response>
@@ -72,8 +72,7 @@ namespace http_handler {
             } else {
                 data["content_type"] = "null";
             }
-
-            BOOST_LOG_TRIVIAL(info) << boost::log::add_value("AdditionalData", data) << "response sent"sv;
+            BOOST_LOG_TRIVIAL(info) << boost::log::add_value("AdditionalData", json::value(data)) << "response sent"sv;
         }
     };
 

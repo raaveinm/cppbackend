@@ -24,7 +24,7 @@ inline void ReportError(const boost::beast::error_code& ec, std::string_view wha
     data["code"] = ec.value();
     data["text"] = ec.message();
     data["where"] = what.data();
-    BOOST_LOG_TRIVIAL(error) << boost::log::add_value("AdditionalData", data) << "error"sv;
+    BOOST_LOG_TRIVIAL(error) << boost::log::add_value("AdditionalData", json::value(data)) << "error"sv;
 }
 
 namespace net = boost::asio;
@@ -94,9 +94,9 @@ class Listener : public std::enable_shared_from_this<Listener<RequestHandler>> {
 public:
     template <typename Handler>
     Listener(net::io_context& ioc, const tcp::endpoint& endpoint, Handler&& request_handler)
-        : request_handler_(std::forward<Handler>(request_handler)),
-    acceptor_(net::make_strand(ioc)), io_context_(ioc) {
-
+        : request_handler_(std::forward<Handler>(request_handler))
+        , acceptor_(net::make_strand(ioc))
+        , io_context_(ioc) {
         acceptor_.open(endpoint.protocol());
         acceptor_.set_option(net::socket_base::reuse_address(true));
         acceptor_.bind(endpoint);

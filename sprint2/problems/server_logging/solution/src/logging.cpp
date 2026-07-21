@@ -17,17 +17,16 @@ namespace logging {
     void MyFormatter(logging::record_view const& rec, logging::formatting_ostream& strm) {
         json::object log_record;
 
-        // Add timestamp
-        auto ts = logging::extract<boost::posix_time::ptime>("TimeStamp", rec);
-        log_record["timestamp"] = to_iso_extended_string(*ts);
+        if (const auto ts = logging::extract<boost::posix_time::ptime>("TimeStamp", rec))
+            log_record["timestamp"] = to_iso_extended_string(*ts);
 
-        // Add message
-        log_record["message"] = *logging::extract<std::string>("Message", rec);
+        if (const auto msg = logging::extract<std::string>("Message", rec))
+            log_record["message"] = *msg;
 
-        // Add additional data
-        auto data = logging::extract<json::value>("AdditionalData", rec);
-        if (data) {
-            log_record["data"] = *data;
+        if (const auto data_obj = logging::extract<json::object>("AdditionalData", rec)) {
+            log_record["data"] = *data_obj;
+        } else if (const auto data_val = logging::extract<json::value>("AdditionalData", rec)) {
+            log_record["data"] = *data_val;
         }
 
         strm << json::serialize(log_record);
@@ -36,7 +35,7 @@ namespace logging {
     void Init() {
         logging::add_common_attributes();
 
-        auto sink = logging::add_console_log(std::cout, keywords::format = &MyFormatter);
+        const auto sink = logging::add_console_log(std::cout, keywords::format = &MyFormatter);
         sink->locked_backend()->auto_flush(true);
     }
 
