@@ -1,5 +1,6 @@
 #include "request_handler.h"
 #include "http_server.h"
+#include <cstdio>
 
 namespace http_handler {
 
