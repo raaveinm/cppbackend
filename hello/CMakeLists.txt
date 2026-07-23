@@ -15,7 +15,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 add_executable(hello src/sample.cpp)
-add_executable(hamburger src/hamburger.cpp)
+add_executable(uuid_gen src/uuid_gen.cpp)
 add_executable(sync_sample src/sync_sample.cpp)
 add_executable(async_server src/async_server_notes.cpp)
 add_executable(boost_fs src/boost_fs.cpp)
