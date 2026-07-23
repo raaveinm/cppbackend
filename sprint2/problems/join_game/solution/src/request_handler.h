@@ -85,10 +85,6 @@ namespace http_handler {
 
         template <typename Body, typename Allocator, typename Send>
         void operator()(http::request<Body, http::basic_fields<Allocator>>&& req, Send&& send) {
-            const auto send_error = [&req, &send](http::status status, std::string_view code, std::string_view message) {
-                send(MakeErrorResponse(status, code, message, req.version(), req.keep_alive()));
-            };
-
             const std::string_view target = req.target();
 
             if (target.starts_with("/api/")) {
@@ -96,23 +92,43 @@ namespace http_handler {
                     if (req.method() != http::verb::post) {
                         auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Only POST method is expected", req.version(), req.keep_alive());
                         resp.set(http::field::allow, "POST");
+                        if (req.method() == http::verb::head) {
+                            resp.body().clear();
+                            resp.prepare_payload();
+                        }
                         return send(resp);
                     }
 
                     try {
-                        const auto json_body = json::parse(req.body());
-                        const auto& obj = json_body.as_object();
-                        if (!obj.contains("userName") || !obj.contains("mapId")) {
-                           return send_error(http::status::bad_request, "invalidArgument", "Join game request parse error");
+                        json::parse_options opt;
+                        opt.allow_invalid_utf8 = true;
+
+                        boost::system::error_code ec;
+                        json::value json_body = json::parse(req.body(), ec, {}, opt);
+
+                        if (ec || !json_body.is_object()) {
+                            return send(MakeErrorResponse(http::status::bad_request, "invalidArgument", "Join game request parse error", req.version(), req.keep_alive()));
                         }
-                        const std::string user_name = obj.at("userName").as_string().c_str();
-                        const std::string map_id = obj.at("mapId").as_string().c_str();
+
+                        const auto& obj = json_body.as_object();
+                        if (!obj.contains("userName") || !obj.contains("mapId") ||
+                            !obj.at("userName").is_string() || !obj.at("mapId").is_string()) {
+                            return send(MakeErrorResponse(http::status::bad_request, "invalidArgument", "Join game request parse error", req.version(), req.keep_alive()));
+                        }
+
+                        const std::string user_name = json::value_to<std::string>(obj.at("userName"));
+                        const std::string map_id = json::value_to<std::string>(obj.at("mapId"));
 
                         if (user_name.empty()) {
-                            return send_error(http::status::bad_request, "invalidArgument", "Invalid name");
+                            return send(MakeErrorResponse(http::status::bad_request, "invalidArgument", "Invalid name", req.version(), req.keep_alive()));
                         }
 
-                        auto [player, token] = game_.AddPlayer(model::Map::Id{map_id}, user_name);
+                        model::Map::Id m_id{map_id};
+                        if (!game_.FindMap(m_id)) {
+                            return send(MakeErrorResponse(http::status::not_found, "mapNotFound", "Map not found", req.version(), req.keep_alive()));
+                        }
+
+                        auto [player, token] = game_.AddPlayer(m_id, user_name);
 
                         http::response<http::string_body> response(http::status::ok, req.version());
                         response.set(http::field::content_type, "application/json");
@@ -127,28 +143,30 @@ namespace http_handler {
                         response.prepare_payload();
                         return send(response);
 
-                    } catch (const std::invalid_argument& e) {
-                        return send_error(http::status::not_found, "mapNotFound", "Map not found");
                     } catch (...) {
-                        return send_error(http::status::bad_request, "invalidArgument", "Join game request parse error");
+                        return send(MakeErrorResponse(http::status::bad_request, "invalidArgument", "Join game request parse error", req.version(), req.keep_alive()));
                     }
                 }
 
                 if (target == "/api/v1/game/players"sv) {
                     if (req.method() != http::verb::get && req.method() != http::verb::head) {
-                        auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Only GET, HEAD are allowed", req.version(), req.keep_alive());
+                        auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive());
                         resp.set(http::field::allow, "GET, HEAD");
+                        if (req.method() == http::verb::head) {
+                            resp.body().clear();
+                            resp.prepare_payload();
+                        }
                         return send(resp);
                     }
 
                     auto auth_header = req.find(http::field::authorization);
                     if (auth_header == req.end()) {
-                        return send_error(http::status::unauthorized, "invalidToken", "Authorization header missing");
+                        return send(MakeErrorResponse(http::status::unauthorized, "invalidToken", "Authorization header missing", req.version(), req.keep_alive()));
                     }
 
                     std::string auth_token = std::string(auth_header->value());
-                    if (auth_token.find("Bearer ") != 0) {
-                        return send_error(http::status::unauthorized, "invalidToken", "Invalid token format");
+                    if (auth_token.find("Bearer ") != 0 || auth_token.size() <= 7) {
+                        return send(MakeErrorResponse(http::status::unauthorized, "invalidToken", "Invalid token format", req.version(), req.keep_alive()));
                     }
 
                     std::string token_str = auth_token.substr(7);
@@ -157,7 +175,7 @@ namespace http_handler {
 
                     const model::Player* player = game_.FindPlayerByToken(token);
                     if (!player) {
-                        return send_error(http::status::unauthorized, "unknownToken", "Player token has not been found");
+                        return send(MakeErrorResponse(http::status::unauthorized, "unknownToken", "Player token has not been found", req.version(), req.keep_alive()));
                     }
 
                     json::object players_json;
@@ -171,18 +189,28 @@ namespace http_handler {
                     response.set(http::field::content_type, "application/json");
                     response.set(http::field::cache_control, "no-cache");
                     response.keep_alive(req.keep_alive());
-                    response.body() = json::serialize(players_json);
+
+                    if (req.method() == http::verb::head) {
+                        response.body() = "";
+                    } else {
+                        response.body() = json::serialize(players_json);
+                    }
                     response.prepare_payload();
                     return send(response);
                 }
 
                 if (req.method() != http::verb::get && req.method() != http::verb::head) {
-                    return send_error(http::status::method_not_allowed, "invalidMethod", "Invalid method");
+                    return send(MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive()));
                 }
 
                 if (constexpr std::string_view api_prefix = "/api/v1/maps"; target.starts_with(api_prefix)) {
                     if (target == api_prefix) {
-                        send(MakeMapsListResponse(req.version(), req.keep_alive()));
+                        auto resp = MakeMapsListResponse(req.version(), req.keep_alive());
+                        if (req.method() == http::verb::head) {
+                            resp.body().clear();
+                            resp.prepare_payload();
+                        }
+                        send(resp);
                         return;
                     } else if (target[api_prefix.size()] == '/') {
                         const std::string_view map_id_str = target.substr(api_prefix.size() + 1);
@@ -190,13 +218,18 @@ namespace http_handler {
                         const auto* map = game_.FindMap(id);
 
                         if (!map) {
-                            return send_error(http::status::not_found, "mapNotFound", "Map not found");
+                            return send(MakeErrorResponse(http::status::not_found, "mapNotFound", "Map not found", req.version(), req.keep_alive()));
                         }
-                        send(MakeMapDescriptionResponse(*map, req.version(), req.keep_alive()));
+                        auto resp = MakeMapDescriptionResponse(*map, req.version(), req.keep_alive());
+                        if (req.method() == http::verb::head) {
+                            resp.body().clear();
+                            resp.prepare_payload();
+                        }
+                        send(resp);
                         return;
                     }
                 }
-                return send_error(http::status::bad_request, "badRequest", "Bad request");
+                return send(MakeErrorResponse(http::status::bad_request, "badRequest", "Bad request", req.version(), req.keep_alive()));
             }
 
             try {
@@ -222,14 +255,14 @@ namespace http_handler {
 
                 http::file_body::value_type file;
                 if (beast::error_code ec; file.open(file_path.c_str(), beast::file_mode::read, ec), ec) {
-                    return send_error(http::status::internal_server_error, "serverError", "Failed to open file");
+                    return send(MakeErrorResponse(http::status::internal_server_error, "serverError", "Failed to open file", req.version(), req.keep_alive()));
                 }
                 res.body() = std::move(file);
 
                 res.prepare_payload();
                 send(std::move(res));
             } catch (const std::exception& e) {
-                send_error(http::status::internal_server_error, "serverError", e.what());
+                send(MakeErrorResponse(http::status::internal_server_error, "serverError", e.what(), req.version(), req.keep_alive()));
             }
         }
 
@@ -258,4 +291,4 @@ namespace http_handler {
 
         [[nodiscard]] static http::response<http::string_body> MakeMapDescriptionResponse(const model::Map& map, unsigned version, bool keep_alive);
     };
-}
+} // namespace http_handler

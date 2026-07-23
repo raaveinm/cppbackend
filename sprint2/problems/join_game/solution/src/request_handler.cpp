@@ -7,7 +7,7 @@ std::string UrlDecode(std::string_view src) {
     std::string ret;
     int ii;
     ret.reserve(src.length());
-    for (int i = 0; i < src.length(); i++) {
+    for (size_t i = 0; i < src.length(); i++) {
         if (src[i] == '%') {
             sscanf(src.substr(i + 1, 2).data(), "%x", &ii);
             const char ch = static_cast<char>(ii);
@@ -35,7 +35,6 @@ std::string_view GetMimeType(const std::filesystem::path& path) {
     if (ext == ".fbx") return "application/octet-stream";
     return "application/octet-stream";
 }
-
 
 RequestHandler::RequestHandler(model::Game& game, std::filesystem::path static_path)
     : game_{game}
@@ -75,8 +74,8 @@ http::response<http::string_body> RequestHandler::MakeErrorResponse(
     response.keep_alive(keep_alive);
 
     json::object err_obj;
-    err_obj["code"] = code.data();
-    err_obj["message"] = message.data();
+    err_obj["code"] = std::string(code);
+    err_obj["message"] = std::string(message);
 
     response.body() = json::serialize(err_obj);
     response.prepare_payload();
