@@ -134,6 +134,51 @@ namespace http_handler {
                     }
                 }
 
+                if (target == "/api/v1/game/players"sv) {
+                    if (req.method() != http::verb::get && req.method() != http::verb::head) {
+                        auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Only GET, HEAD are allowed", req.version(), req.keep_alive());
+                        resp.set(http::field::allow, "GET, HEAD");
+                        return send(resp);
+                    }
+
+                    auto auth_header = req.find(http::field::authorization);
+                    if (auth_header == req.end()) {
+                        return send_error(http::status::unauthorized, "invalidToken", "Authorization header missing");
+                    }
+
+                    std::string auth_token = std::string(auth_header->value());
+                    if (auth_token.find("Bearer ") != 0) {
+                        return send_error(http::status::unauthorized, "invalidToken", "Invalid token format");
+                    }
+
+                    std::string token_str = auth_token.substr(7);
+                     if (token_str.find_first_not_of("0123456789abcdef") != std::string::npos || token_str.length() != 32) {
+                        return send_error(http::status::unauthorized, "invalidToken", "Invalid token");
+                    }
+
+                    model::Token token{token_str};
+
+                    const model::Player* player = game_.FindPlayerByToken(token);
+                    if (!player) {
+                        return send_error(http::status::unauthorized, "unknownToken", "Player token has not been found");
+                    }
+
+                    json::object players_json;
+                    for (const auto& p : game_.GetPlayers()) {
+                        json::object player_obj;
+                        player_obj["name"] = p->GetName();
+                        players_json[std::to_string(*p->GetId())] = player_obj;
+                    }
+                    
+                    http::response<http::string_body> response(http::status::ok, req.version());
+                    response.set(http::field::content_type, "application/json");
+                    response.set(http::field::cache_control, "no-cache");
+                    response.keep_alive(req.keep_alive());
+                    response.body() = json::serialize(players_json);
+                    response.prepare_payload();
+                    return send(response);
+                }
+
                 if (req.method() != http::verb::get && req.method() != http::verb::head) {
                     return send_error(http::status::method_not_allowed, "invalidMethod", "Invalid method");
                 }

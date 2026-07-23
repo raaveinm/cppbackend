@@ -55,6 +55,7 @@ http::response<http::string_body> RequestHandler::MakeTextErrorResponse(
 ) {
     http::response<http::string_body> response(status, version);
     response.set(http::field::content_type, "text/plain");
+    response.set(http::field::cache_control, "no-cache");
     response.keep_alive(keep_alive);
     response.body() = std::string(message);
     response.prepare_payload();
@@ -70,6 +71,7 @@ http::response<http::string_body> RequestHandler::MakeErrorResponse(
 ) {
     http::response<http::string_body> response(status, version);
     response.set(http::field::content_type, "application/json");
+    response.set(http::field::cache_control, "no-cache");
     response.keep_alive(keep_alive);
 
     json::object err_obj;
@@ -84,6 +86,7 @@ http::response<http::string_body> RequestHandler::MakeErrorResponse(
 http::response<http::string_body> RequestHandler::MakeMapsListResponse(const unsigned version, const bool keep_alive) const {
     http::response<http::string_body> response(http::status::ok, version);
     response.set(http::field::content_type, "application/json");
+    response.set(http::field::cache_control, "no-cache");
     response.keep_alive(keep_alive);
 
     json::array maps_arr;
@@ -102,6 +105,7 @@ http::response<http::string_body> RequestHandler::MakeMapsListResponse(const uns
 http::response<http::string_body> RequestHandler::MakeMapDescriptionResponse(const model::Map& map, const unsigned version, const bool keep_alive) {
     http::response<http::string_body> response(http::status::ok, version);
     response.set(http::field::content_type, "application/json");
+    response.set(http::field::cache_control, "no-cache");
     response.keep_alive(keep_alive);
 
     json::object map_obj;

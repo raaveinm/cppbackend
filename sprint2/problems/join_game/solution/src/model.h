@@ -246,6 +246,7 @@ public:
     Player& Add(Dog* dog, GameSession* session);
     const Player* FindByDogIdAndMapId(const Dog::Id& dog_id, const Map::Id& map_id) const;
     const Player* FindById(const PlayerId& id) const;
+    const std::vector<std::unique_ptr<Player>>& GetPlayers() const { return players_; }
 
 private:
     std::vector<std::unique_ptr<Player>> players_;
@@ -278,6 +279,9 @@ public:
     }
 
     std::pair<Player&, Token> AddPlayer(const Map::Id& map_id, const std::string& player_name);
+
+    const Player* FindPlayerByToken(const Token& token) const;
+    const std::vector<std::unique_ptr<Player>>& GetPlayers() const;
 
 private:
     using MapIdHasher = util::TaggedHasher<Map::Id>;

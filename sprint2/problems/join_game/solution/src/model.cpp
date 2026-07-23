@@ -123,4 +123,13 @@ const Player* Players::FindById(const PlayerId& id) const {
     return nullptr;
 }
 
+const Player* Game::FindPlayerByToken(const Token& token) const {
+    return player_tokens_.FindPlayerByToken(token);
+}
+
+const std::vector<std::unique_ptr<Player>>& Game::GetPlayers() const {
+    return players_.GetPlayers();
+}
+
+
 }  // namespace model
