@@ -152,10 +152,7 @@ namespace http_handler {
                     }
 
                     std::string token_str = auth_token.substr(7);
-                     if (token_str.find_first_not_of("0123456789abcdef") != std::string::npos || token_str.length() != 32) {
-                        return send_error(http::status::unauthorized, "invalidToken", "Invalid token");
-                    }
-
+                    
                     model::Token token{token_str};
 
                     const model::Player* player = game_.FindPlayerByToken(token);
