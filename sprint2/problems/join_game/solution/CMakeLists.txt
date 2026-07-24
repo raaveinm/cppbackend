@@ -35,8 +35,8 @@ add_executable(game_server
 		src/request_handler.h
 		src/logging.cpp
 		src/logging.h
-		src/player.cpp
 		src/player.h
+		src/util/token_generator.h
 )
 
 target_link_libraries(game_server PRIVATE

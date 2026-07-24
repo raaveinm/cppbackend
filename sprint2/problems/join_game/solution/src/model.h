@@ -7,6 +7,7 @@
 #include <boost/uuid/uuid.hpp>
 
 #include "tagged.h"
+#include "util/token_generator.h" // Include the new token generator
 
 namespace model {
 
@@ -201,7 +202,7 @@ class GameSession {
 public:
     using Dogs = std::vector<std::unique_ptr<Dog>>;
 
-    GameSession(const Map* map) : map_{map} {}
+    explicit GameSession(const Map* map) : map_{map} {}
 
     const Map* GetMap() const noexcept { return map_; }
     const Dogs& GetDogs() const { return dogs_; }
@@ -238,7 +239,7 @@ public:
 private:
     using TokenHasher = util::TaggedHasher<Token>;
     std::unordered_map<Token, const Player*, TokenHasher> token_to_player_;
-    boost::uuids::random_generator generator_;
+    util::TokenGenerator generator_; // Changed to util::TokenGenerator
 };
 
 class Players {

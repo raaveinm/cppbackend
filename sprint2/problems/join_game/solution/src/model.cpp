@@ -84,13 +84,10 @@ GameSession* Player::GetSession() const noexcept {
 }
 
 Token PlayerTokens::AddPlayer(const Player& player) {
-    const auto token = [&]() {
-        std::stringstream stream;
-        stream << std::hex << generator_() << generator_();
-        return stream.str();
-    }();
-    token_to_player_.emplace(Token{token}, &player);
-    return Token{token};
+    const auto token_str = generator_.GenerateToken(); // Get std::string
+    Token token{token_str}; // Convert to model::Token
+    token_to_player_.emplace(token, &player);
+    return token;
 }
 
 const Player* PlayerTokens::FindPlayerByToken(const Token& token) const {
