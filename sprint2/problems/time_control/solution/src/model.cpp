@@ -11,17 +11,29 @@ void Map::AddRoad(const Road& road) {
     if (road.IsHorizontal()) {
         auto start = road.GetStart();
         auto end = road.GetEnd();
-        double x1 = start.x;
-        double x2 = end.x;
-        double y = start.y;
-        horizontal_road_boundaries_.push_back({std::min(x1, x2), y - 0.4, std::max(x1, x2), y + 0.4});
+        double x1 = static_cast<double>(start.x);
+        double x2 = static_cast<double>(end.x);
+        double y = static_cast<double>(start.y);
+
+        horizontal_road_boundaries_.push_back({
+            std::min(x1, x2) - 0.4,
+            y - 0.4,
+            std::max(x1, x2) + 0.4,
+            y + 0.4
+        });
     } else { // Vertical
         auto start = road.GetStart();
         auto end = road.GetEnd();
         double y1 = static_cast<double>(start.y);
         double y2 = static_cast<double>(end.y);
         double x = static_cast<double>(start.x);
-        vertical_road_boundaries_.push_back({x - 0.4, std::min(y1, y2), x + 0.4, std::max(y1, y2)});
+
+        vertical_road_boundaries_.push_back({
+            x - 0.4,
+            std::min(y1, y2) - 0.4,
+            x + 0.4,
+            std::max(y1, y2) + 0.4
+        });
     }
 }
 
