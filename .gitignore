@@ -730,4 +730,5 @@ sprint3/problems/flamegraph/solution/graph.svg
 *.xml
 
 **/.DS_Store
-/hello/CMakeUserPresets.json
+**/CMakeUserPresets.json
+.air

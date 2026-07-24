@@ -1,71 +1,126 @@
-Инструкция тестировалась на Conan, установленном через `pip install conan==1.52.0`. Версия 1.51 не работала.
+# TODO
 
-Подробности см. в уроке [Ещё раз о conan — линкуем с умом](https://www.notion.so/praktikum/bc565fa7a70040c48dc10850049b0a62?v=24f7e4d44c034398bc7a2c0899dbfd07&p=13c770a14d9246f58379cc4228d1a1ce&pm=s).
+Implement the game join operations and retrieving player information on the game server. A user can join the game on any of the available maps. To join the game, they must provide the server with their dog's nickname and the map ID.
 
-## Сборка под Linux
+The server must create a dog on the specified map and a player controlling the dog, and then return the player ID and an authentication token to the client. The ID is needed by the client to distinguish its player from others. The client must present the token to the server to receive information about the game session state and to control its player.
 
-При сборке под Linux обязательно указываются флаги:
-* `-s compiler.libcxx=libstdc++11`
-* `-s build_type=???`
+## Terminology
 
-Вот пример конфигурирования для Release и Debug:
-```
-# mkdir -p build-release 
-# cd build-release
-# conan install .. --build=missing -s build_type=Release -s compiler.libcxx=libstdc++11
-# cmake .. -DCMAKE_BUILD_TYPE=Release
-# cd ..
+* **Dog** — a game object capable of moving around the game map and interacting with other objects according to the game rules.
 
-# mkdir -p build-debug
-# cd build-debug
-# conan install .. --build=missing -s build_type=Debug -s compiler.libcxx=libstdc++11
-# cmake .. -DCMAKE_BUILD_TYPE=Debug
-# cd ..
 
-```
+* **Game Server** (or simply **Server**) — a program running on the server computer. It implements game logic and provides a REST API.
 
-## Сборка под Windows
 
-Нужно выполнить два шага:
-1. В conanfile.txt нужно изменить `cmake` на `cmake_multi`. После этого можно конфигурировать таким способом:
-2. В CMakeLists.txt заменить `include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)` на `include(${CMAKE_BINARY_DIR}/conanbuildinfo_multi.cmake)`.
+* **Client** — software running in a browser. It can interact with the server and visualize the game state.
 
-После этого можно запустить подобный снипет:
 
-```
-# mkdir build 
-# cd build
-# conan install .. --build=missing -s build_type=Debug
-# conan install .. --build=missing -s build_type=Release
-# conan install .. --build=missing -s build_type=RelWithDebInfo
-# conan install .. --build=missing -s build_type=MinSizeRel
-# cmake ..
-```
+* **User** — a person participating in the game using the client software.
 
-В таком случае будут собираться все конфигурации (что не быстро). Можно сэкономить время, оставив только нужные.
 
-Запускать сборку нужно только через родной cmd. В других консолях иногда возникают проблемы.
+* **Player** — an agent inside the game server through which the user can control their dog.
 
-## Запуск докера
 
-Можно собирать и запускать сервер одной командой (вернее, двумя) в докере. Делается это так:
+* **Token** — a pseudorandom sequence of characters known only to the user and the server. Therefore, the user can only control their own player, as they do not know the tokens of other players.
+
+
+
+## JOIN GAME
+
+To join the game, implement handling of a POST request to the endpoint `/api/v1/game/join`. Request parameters:
+
+* Required header `Content-Type` must be of type `application/json`.
+
+
+* Request body — a JSON object with required fields `userName` and `mapId`: the player's name and the map ID. The player's name is the same as the dog's name.
+
+
+
+Request example:
+
+```text
+POST /api/v1/game/join HTTP/1.1
+Content-Type: application/json
+
+{"userName": "Scooby Doo", "mapId": "map1"}
 
 ```
-docker build -t my_http_server .
-docker run --rm -p 80:8080 my_http_server
+
+In case of success, a response with the following properties should be returned:
+
+* Status code `200 OK`.
+
+
+* Header `Content-Type` must be of type `application/json`.
+
+
+* Header `Content-Length` must store the size of the response body.
+
+
+* Required header `Cache-Control` must have the value `no-cache`.
+
+
+* Response body — a JSON object with fields `authToken` and `playerId`. Field `playerId` — an integer specifying the player ID. Field `authToken` — a token for in-game authorization — a string consisting of 32 random hexadecimal digits.
+
+
+
+Response example:
+
+```text
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: 61
+Cache-Control: no-cache
+
+{"authToken":"6516861d89ebfff147bf2eb2b5153ae1","playerId":0}
+
 ```
 
-Это каноничный способ запуска, которым будут пользоваться студенты. Если он не работает, значит, мы что-то не так делаем.
+If a non-existent map ID is specified for `mapId`, a response must be returned with status code `404 Not found` and headers `Content-Length: <response body size>`, `Content-Type: application/json`, and `Cache-Control: no-cache`. Response body — a JSON object with fields `code` and `message`. The `code` field — string `"mapNotFound"`. The `message` field — a human-readable error description string. Example:
 
-Из докерфайла можно узнать все детали сборки запуска, если что-то идёт не так локально.
+```text
+HTTP/1.1 404 Not found
+Content-Type: application/json
+Content-Length: 51
+Cache-Control: no-cache
 
-## Запуск
+{"code": "mapNotFound", "message": "Map not found"}
 
-В папке `build` выполнить команду
-```sh
-bin/game_server ../data/config.json ../static/
 ```
-После этого можно открыть в браузере:
-* http://127.0.0.1:8080/api/v1/maps для получения списка карт и
-* http://127.0.0.1:8080/api/v1/map/map1 для получения подробной информации о карте `map1`
-* http://127.0.0.1:8080/ для чтения статического контента (в каталоге static)
+
+If an empty player name was provided, a response must be returned with status code `400 Bad request` and headers `Content-Length: <response body size>`, `Content-Type: application/json`, and `Cache-Control: no-cache`. Response body — a JSON object with fields `code` and `message`. The `code` field — string `"invalidArgument"`. The `message` field — a human-readable error description string. Example:
+
+```text
+HTTP/1.1 400 Bad request
+Content-Type: application/json
+Content-Length: 54
+Cache-Control: no-cache
+
+{"code": "invalidArgument", "message": "Invalid name"}
+
+```
+
+If an error occurred while parsing JSON or retrieving its properties, a response must be returned with status code `400 Bad request` and headers `Content-Length: <response body size>`, `Content-Type: application/json`, and `Cache-Control: no-cache`. Response body — a JSON object with fields `code` and `message`. The `code` field — string `"invalidArgument"`. The `message` field — a human-readable error description string. Example:
+
+```text
+HTTP/1.1 400 Bad request
+Content-Type: application/json
+Content-Length: 71
+Cache-Control: no-cache
+
+{"code": "invalidArgument", "message": "Join game request parse error"}
+
+```
+
+If the request method is not `POST`, a response must be returned with status code `405 Method Not Allowed` and headers `Content-Length: <response body size>`, `Content-Type: application/json`, `Allow: POST`, and `Cache-Control: no-cache`. Response body — a JSON object with fields `code` and `message`. The `code` field — string `"invalidMethod"`, and `message` — a human-readable error description string. Example:
+
+```text
+HTTP/1.1 405 Method Not Allowed
+Content-Type: application/json
+Allow: POST
+Content-Length: 68
+Cache-Control: no-cache
+
+{"code": "invalidMethod", "message": "Only POST method is expected"} 
+
+```
