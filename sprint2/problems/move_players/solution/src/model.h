@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
-#include <functional>
+#include <optional>
 #include <random>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/asio/io_context.hpp>
