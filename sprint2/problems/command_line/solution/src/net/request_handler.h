@@ -10,8 +10,8 @@
 #include <boost/log/utility/manipulators/add_value.hpp>
 #include <optional>
 
-#include "logging.h"
-#include "model.h"
+#include "../util/logging.h"
+#include "../model/model.h"
 
 namespace http_handler {
     namespace beast = boost::beast;

@@ -11,8 +11,8 @@
 
 namespace net = boost::asio;
 
-#include "tagged.h"
-#include "util/token_generator.h"
+#include "../util/tagged.h"
+#include "../util/token_generator.h"
 
 namespace model {
 

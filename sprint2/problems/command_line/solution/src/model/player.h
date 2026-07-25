@@ -1,11 +1,10 @@
 #pragma once
 #include <string>
 #include <string_view>
-#include "tagged.h"
-#include "model.h" // Include model.h to get model::Token
-
+#include "../util/tagged.h"
 #include "model.h"
-#include "util/token_generator.h"
+
+#include "../util/token_generator.h"
 
 
 namespace model {
@@ -49,7 +48,7 @@ namespace model {
         return *players_.back();
     }
 
-    const Player* Players::FindByDogIdAndMapId(const Dog::Id& dog_id, const Map::Id& map_id) const {
+    inline const Player* Players::FindByDogIdAndMapId(const Dog::Id& dog_id, const Map::Id& map_id) const {
         for (const auto& player : players_) {
             if (player->GetDog()->GetId() == dog_id && player->GetSession()->GetMap()->GetId() == map_id) {
                 return player.get();
@@ -58,7 +57,7 @@ namespace model {
         return nullptr;
     }
 
-    const Player* Players::FindById(const PlayerId& id) const {
+    inline const Player* Players::FindById(const PlayerId& id) const {
         for (const auto& player : players_) {
             if (player->GetId() == id) {
                 return player.get();

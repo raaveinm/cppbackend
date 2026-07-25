@@ -1,7 +1,6 @@
 #include "logging.h"
 
 #include <boost/log/core.hpp>
-#include <boost/log/expressions.hpp>
 #include <boost/log/utility/setup/file.hpp>
 #include <boost/log/utility/setup/console.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>

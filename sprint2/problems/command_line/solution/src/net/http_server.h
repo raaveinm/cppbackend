@@ -1,8 +1,8 @@
 #pragma once
-#include "sdk.h"
+#include "../util/sdk.h"
 #define BOOST_BEAST_USE_STD_STRING_VIEW
 
-#include "logging.h"
+#include "../util/logging.h"
 
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core.hpp>

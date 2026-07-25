@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <cassert>
+#include <utility>
 
 namespace net = boost::asio;
 namespace sys = boost::system;
@@ -16,8 +17,8 @@ public:
     using Strand = net::strand<net::io_context::executor_type>;
     using Handler = std::function<void(std::chrono::milliseconds delta)>;
 
-    Ticker(Strand strand, std::chrono::milliseconds period, Handler handler)
-        : strand_{strand}
+    Ticker(Strand strand, const std::chrono::milliseconds period, Handler handler)
+        : strand_{std::move(strand)}
         , period_{period}
         , handler_{std::move(handler)} {
     }
@@ -38,13 +39,13 @@ private:
         });
     }
 
-    void OnTick(sys::error_code ec) {
+    void OnTick(const sys::error_code &ec) {
         using namespace std::chrono;
         assert(strand_.running_in_this_thread());
 
         if (!ec) {
-            auto this_tick = Clock::now();
-            auto delta = duration_cast<milliseconds>(this_tick - last_tick_);
+            const auto this_tick = Clock::now();
+            const auto delta = duration_cast<milliseconds>(this_tick - last_tick_);
             last_tick_ = this_tick;
             try {
                 handler_(delta);

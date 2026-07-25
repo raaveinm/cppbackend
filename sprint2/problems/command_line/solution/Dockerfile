@@ -1,35 +1,47 @@
-FROM gcc:11.3 as build
+FROM ubuntu:22.04 AS builder
 
-LABEL authors="raaveinm"
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    g++ \
+    cmake \
+    ninja-build \
+    python3-pip \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apt update && \
-    apt install -y \
-      python3-pip \
-      cmake \
-    && \
-    pip3 install conan==1.*
+RUN pip3 install conan==1.62.0
 
-COPY conanfile.txt /app/
-RUN mkdir /app/build && cd /app/build && \
-    conan install .. --build=missing
+WORKDIR /app
+COPY conanfile.txt .
 
-COPY ./src /app/src
-COPY CMakeLists.txt /app/
+RUN conan install . --build=missing -s build_type=Release -if build
 
-RUN cd /app/build && \
-    cmake -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release .. && \
-    cmake --build .
+COPY . .
 
-FROM ubuntu:22.04 as run
+RUN cmake -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE=/app/build/conan_toolchain.cmake \
+    -DCMAKE_PREFIX_PATH=/app/build
 
-RUN groupadd -r www && useradd -r -g www www
+RUN cmake --build build --target game_server
 
-COPY --chown=www:www --from=build /app/build/game_server /app/
-COPY --chown=www:www ./data /app/data
-COPY --chown=www:www ./static /app/static
+FROM ubuntu:22.04 AS runner
 
-USER www
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 8080
+RUN pip3 install prometheus_client
 
-ENTRYPOINT ["/app/game_server", "/app/data/config.json", "/app/static"]
+WORKDIR /app
+
+COPY --from=builder /app/build/game_server ./game_server
+COPY --from=builder /app/data ./data
+COPY --from=builder /app/static ./static
+COPY web_exporter.py .
+
+EXPOSE 8080 9200
+
+CMD ["sh", "-c", "./game_server -c data/config.json -w static -t 50 | python3 -u web_exporter.py"]

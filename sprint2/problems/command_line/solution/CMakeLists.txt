@@ -22,22 +22,22 @@ find_package(Threads REQUIRED)
 
 add_executable(game_server
 		src/main.cpp
-		src/http_server.cpp
-		src/http_server.h
-		src/sdk.h
-		src/model.h
-		src/model.cpp
-		src/tagged.h
-		src/boost_json.cpp
-		src/json_loader.h
-		src/json_loader.cpp
-		src/request_handler.cpp
-		src/request_handler.h
-		src/logging.cpp
-		src/logging.h
-		src/player.h
+		src/net/http_server.cpp
+		src/net/http_server.h
+		src/util/sdk.h
+		src/model/model.h
+		src/model/model.cpp
+		src/util/tagged.h
+		src/loader/boost_json.cpp
+		src/loader/json_loader.h
+		src/loader/json_loader.cpp
+		src/net/request_handler.cpp
+		src/net/request_handler.h
+		src/util/logging.cpp
+		src/util/logging.h
+		src/model/player.h
 		src/util/token_generator.h
-		src/ticker.h
+		src/util/ticker.h
 )
 
 target_link_libraries(game_server PRIVATE
