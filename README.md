@@ -1,231 +1,53 @@
-# Multiplayer Game Server (C++)
-
-An asynchronous, multithreaded game server written in C++ using **Boost.Asio** and **PostgreSQL**[cite: 1]. Players connect to game maps, control dogs to gather lost items, deliver them to lost-and-found offices to score points, and compete on a persistent high-score leaderboard[cite: 1].
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Key Features](#key-features)
-- [System Architecture](#system-architecture)
-  - [Module Hierarchy](#module-hierarchy)
-  - [Domain Class Model](#domain-class-model)
-- [Concurrency & Thread Safety](#concurrency--thread-safety)
-- [Authentication & Session Flow](#authentication--session-flow)
-- [Tech Stack](#tech-stack)
-
----
-
-## Overview
-
-The game server acts as the **single source of truth** for the game state[cite: 1]. Clients receive a customized subset of the world model based on their active map and player context[cite: 1]:
-* **Detailed Info:** Players get full state metrics for their own character (current score, carried items, velocity, position)[cite: 1].
-* **Minimal Info:** Information about opponent players is limited to essential state (nickname, position, velocity)[cite: 1].
-
-### Gameplay Mechanics
-* **Objective:** Navigate game maps, pick up lost items on roads, and deliver them to lost-and-found offices to score points[cite: 1].
-* **Session Lifecycle:** Inactivity triggers game-over conditions[cite: 1]. Scores are submitted to the global scoreboard upon completion[cite: 1].
-* **Persistence:** The server periodically saves its world state to disk to ensure recovery after restarts or crashes[cite: 1]. High score leaderboards are stored in a PostgreSQL database[cite: 1].
-
----
-
-## Key Features
-
-- **Asynchronous HTTP Engine:** High-performance REST API powered by `Boost.Asio` and `Boost.Beast`[cite: 1].
-- **Strand-Based Thread Safety:** Multi-threaded request dispatching protected from race conditions via `boost::asio::strand`[cite: 1].
-- **State Persistence & Recovery:** Automatic periodic state snapshotting to disk and database integration for high scores[cite: 1].
-- **Modular Layered Architecture:** Decoupled modules following the Dependency Inversion Principle (DIP)[cite: 1].
-
----
-
-## System Architecture
-
-### Module Hierarchy
-
-The codebase is split into decoupled layers[cite: 1]. High-level application modules depend on abstractions rather than low-level details[cite: 1].
-
-```mermaid
-graph BT
-    subgraph http_server ["http_server (HTTP Engine Framework)"]
-        Listener["Listener"]
-        Session["Session"]
-        InterfaceRequestHandler["<<Interface>> RequestHandler"]
-
-        Listener --> Session
-        Session --> InterfaceRequestHandler
-    end
-
-    subgraph request_handler ["request_handler (HTTP Request Processing)"]
-        RH_Left["..."]
-        RequestHandler["RequestHandler"]
-        RH_Right["..."]
-
-        RequestHandler -.-> RH_Left
-        RequestHandler -.-> RH_Right
-    end
-
-    subgraph app ["app (Use Cases & Player Logic)"]
-        App_Left["..."]
-        Player["Player"]
-        App_Right["..."]
-    end
-
-    subgraph model ["model (Domain Entities & Rules)"]
-        Game["Game"]
-        Map["Map"]
-        GameSession["GameSession"]
-        M1["Road"]
-        M2["Building"]
-        M3["Office"]
-        M4["Dog"]
-
-        Game --> Map
-        Game --> GameSession
-        Map --> M1
-        Map --> M2
-        GameSession --> M3
-        GameSession --> M4
-    end
-
-    request_handler -.-|"Implements HTTP interface"| InterfaceRequestHandler
-    request_handler -.-|"Invokes use cases"| app
-    app -.-|"Mutates domain model"| model
-
-```
-
-* **`model`**: Physical world entities, movement mechanics, collision rules, and game logic.
-
-
-* **`app`**: Player abstractions, authentication management, and application use-cases.
-
-
-* **`request_handler`**: Maps incoming REST/JSON API requests to application scenarios.
-
-
-* **`http_server`**: Reusable, protocol-agnostic asynchronous HTTP transport layer.
-
-
-
----
-
-### Domain Class Model
-
-```mermaid
-classDiagram
-    class Game {
-        -maps_: vector~Map~
-        -sessions_: vector~GameSession~
-    }
-
-    class Map {
-        -roads_: vector~Road~
-        -buildings_: vector~Building~
-        -offices_: vector~Office~
-    }
-
-    class GameSession {
-        -dogs_: vector~Dog~
-        -map_: Map*
-    }
-
-    class Player {
-        -session_: GameSession*
-        -dog_: Dog*
-    }
-
-    class PlayerTokens {
-        -token_to_player_: unordered_map~Token, Player*~
-        +FindPlayerByToken(token: Token) Player*
-        +AddPlayer(player: Player&) Token
-    }
-
-    class Players {
-        +Add(dog: Dog&, session: GameSession&) Player&
-        +FindByDogIdAndMapId(dog_id, map_id) Player*
-    }
-
-    Game o-- Map
-    Game o-- GameSession
-    Map o-- Office
-    Map o-- Building
-    Map o-- Road
-    GameSession o-- Map
-    GameSession o-- Dog
-    Player o-- Dog
-    Player o-- GameSession
-    PlayerTokens o-- Player
-    Players o-- Player
-
-```
-
----
-
-## Concurrency & Thread Safety
-
-To prevent data races while executing across multiple worker threads, domain state modifications are dispatched through `boost::asio::strand`.
-
-### Strand Request Dispatching
-
-```c++
-class RequestHandler : public std::enable_shared_from_this<RequestHandler> {
-public:
-    using Strand = net::strand<net::io_context::executor_type>;
-
-    RequestHandler(fs::path root, Strand api_strand)
-        : root_{std::move(root)}
-        , api_strand_{api_strand} {}
-
-    template <typename Body, typename Allocator, typename Send>
-    void operator()(tcp::endpoint, http::request<Body, http::basic_fields<Allocator>>&& req, Send&& send) {
-        auto version = req.version();
-        auto keep_alive = req.keep_alive();
-
-        try {
-            if (IsApiRequest(req)) {
-                auto handle = [self = shared_from_this(), send, req = std::forward<decltype(req)>(req), version, keep_alive] {
-                    try {
-                        assert(self->api_strand_.running_in_this_thread());
-                        return send(self->HandleApiRequest(req));
-                    } catch (...) {
-                        send(self->ReportServerError(version, keep_alive));
-                    }
-                };
-                return net::dispatch(api_strand_, handle);
-            }
-            
-            return std::visit([&send](auto&& result) {
-                send(std::forward<decltype(result)>(result));
-            }, HandleFileRequest(req));
-        } catch (...) {
-            send(ReportServerError(version, keep_alive));
-        }
-    }
-
-private:
-    fs::path root_;
-    Strand api_strand_;
-};
-
-```
-
----
-
-## Authentication & Session Flow
-
-1. **Join Request:** When a client connects, they specify a target map and a dog nickname.
-
-
-2. **Token Generation:** The server creates a `Dog` entity with a unique numerical ID, assigns it to a `GameSession`, and generates a secure bearer token (UUID) via `PlayerTokens`.
-
-
-3. **Authorization Header:** All subsequent requests require the token passed in the `Authorization` standard HTTP header:
-
-
-
-```http
-Authorization: Bearer <auth_token>
-
-```
-
-4. **Validation:** The server looks up the player state using `PlayerTokens::FindPlayerByToken(token)` before performing actions on the character.
+# Game Server Design
+
+*languages: [ru](README.ru.md)*
+
+## 1. Project Overview
+This project implements a C++ game server designed to handle game logic, manage player data, and serve HTTP requests. It includes functionalities for loading game configurations, processing client requests, and providing monitoring endpoints.
+
+## 2. Technology Stack
+*   **Language**: C++20
+*   **Build System**: CMake
+*   **Dependency Management**: Conan
+*   **Networking**: Boost.Beast (implied by `http_server.cpp` and Boost dependency)
+*   **Logging**: Boost.Log
+*   **JSON Handling**: Boost.JSON
+*   **Containerization**: Docker
+*   **Monitoring**: Prometheus (with a Python web exporter)
+
+## 3. Architecture
+The game server is structured around several key components:
+*   **HTTP Server (`net/http_server.h/.cpp`)**: Handles incoming HTTP connections and dispatches requests.
+*   **Request Handler (`net/request_handler.h/.cpp`)**: Processes specific HTTP requests, interacting with the game model.
+*   **Game Model (`model/model.h/.cpp`, `model/player.h`)**: Contains the core game logic, data structures for game entities (like players), and state management.
+*   **JSON Loader (`loader/json_loader.h/.cpp`, `loader/boost_json.cpp`)**: Responsible for loading game configurations and data from JSON files using Boost.JSON.
+*   **Utilities (`util/sdk.h`, `util/tagged.h`, `util/logging.h/.cpp`, `util/token_generator.h`, `util/ticker.h`)**: Provides common utilities such as logging, unique ID generation, and timing mechanisms.
+
+## 4. Build System
+The project uses CMake for its build system, managing the compilation of C++ source files and linking dependencies. Conan is integrated to handle third-party C++ dependencies, ensuring a consistent build environment.
+
+## 5. Deployment
+The server is deployed using Docker, leveraging a multi-stage build process:
+
+### Build Stage
+1.  **Base Image**: `ubuntu:22.04`
+2.  **Dependencies**: Installs `g++`, `cmake`, `ninja-build`, `python3-pip`, `git`.
+3.  **Conan**: Installs Conan (version 1.62.0) and uses `conan install` to fetch and build C++ dependencies.
+4.  **CMake Configuration**: Configures the project with CMake using Ninja as the generator and Conan's toolchain file.
+5.  **Build**: Compiles the `game_server` executable.
+
+### Runtime Stage
+1.  **Base Image**: `ubuntu:22.04`
+2.  **Dependencies**: Installs `python3` and `python3-pip` for the web exporter.
+3.  **Application Files**: Copies the compiled `game_server` executable, `data` directory, `static` directory, and `web_exporter.py` from the build stage.
+4.  **Exposed Ports**: Exposes port `8080` for the game server and `9200` for the Prometheus web exporter.
+5.  **Entrypoint**: The `CMD` executes the `game_server` with a configuration file, static content path, and a ticker interval, piping its output to the `web_exporter.py` script.
+
+## 6. Monitoring
+Monitoring is set up using Prometheus. The `prometheus.yml` configuration indicates:
+*   **Scrape Interval**: Metrics are scraped every 30 seconds.
+*   **Targets**:
+    *   `node-exporter:9100`: For host-level metrics.
+    *   `game-server:9200`: For application-specific metrics exposed by the `web_exporter.py` script.
+
+The `web_exporter.py` script likely parses the game server's output (piped from `stdout`) and exposes relevant metrics in a Prometheus-compatible format on port 9200.
