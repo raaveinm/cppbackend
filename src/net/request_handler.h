@@ -13,6 +13,15 @@
 #include "../util/logging.h"
 #include "../model/model.h"
 
+namespace serialization {
+    namespace json = boost::json;
+
+    json::array SerializeRoads(const model::Map::Roads& roads);
+    json::array SerializeBuildings(const model::Map::Buildings& buildings);
+    json::array SerializeOffices(const model::Map::Offices& offices);
+    json::object SerializeMap(const model::Map& map);
+}
+
 namespace http_handler {
     namespace beast = boost::beast;
     namespace http = beast::http;
@@ -20,6 +29,19 @@ namespace http_handler {
     namespace net = boost::asio;
     using tcp = net::ip::tcp;
     using namespace std::literals;
+
+    namespace endpoints {
+        using namespace std::string_view_literals;
+
+        constexpr std::string_view API_PREFIX = "/api/"sv;
+        constexpr std::string_view API_V1_PREFIX = "/api/v1/"sv;
+        constexpr std::string_view MAPS = "/api/v1/maps"sv;
+        constexpr std::string_view GAME_JOIN = "/api/v1/game/join"sv;
+        constexpr std::string_view GAME_PLAYERS = "/api/v1/game/players"sv;
+        constexpr std::string_view GAME_STATE = "/api/v1/game/state"sv;
+        constexpr std::string_view GAME_PLAYER_ACTION = "/api/v1/game/player/action"sv;
+        constexpr std::string_view GAME_TICK = "/api/v1/game/tick"sv;
+    }
 
     std::string UrlDecode(std::string_view src);
     std::string_view GetMimeType(const std::filesystem::path& path);
@@ -88,8 +110,8 @@ namespace http_handler {
         void operator()(http::request<Body, http::basic_fields<Allocator>>&& req, Send&& send) {
             const std::string_view target = req.target();
 
-            if (target.starts_with("/api/")) {
-                if (target == "/api/v1/game/join"sv) {
+            if (target.starts_with(endpoints::API_PREFIX)) {
+                if (target == endpoints::GAME_JOIN) {
                     if (req.method() != http::verb::post) {
                         auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Only POST method is expected", req.version(), req.keep_alive());
                         resp.set(http::field::allow, "POST");
@@ -149,7 +171,7 @@ namespace http_handler {
                     }
                 }
 
-                if (target == "/api/v1/game/players"sv) {
+                if (target == endpoints::GAME_PLAYERS) {
                     if (req.method() != http::verb::get && req.method() != http::verb::head) {
                         auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive());
                         resp.set(http::field::allow, "GET, HEAD");
@@ -186,7 +208,7 @@ namespace http_handler {
                     }));
                 }
 
-                if (target == "/api/v1/game/state"sv) {
+                if (target == endpoints::GAME_STATE) {
                     if (req.method() != http::verb::get && req.method() != http::verb::head) {
                         auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive());
                         resp.set(http::field::allow, "GET, HEAD");
@@ -243,7 +265,7 @@ namespace http_handler {
                     return;
                 }
 
-                if (target == "/api/v1/game/player/action"sv) {
+                if (target == endpoints::GAME_PLAYER_ACTION) {
                     if (req.method() != http::verb::post) {
                         auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive());
                         resp.set(http::field::allow, "POST");
@@ -302,7 +324,7 @@ namespace http_handler {
                     return;
                 }
 
-                if (target == "/api/v1/game/tick"sv) {
+                if (target == endpoints::GAME_TICK) {
                     if (auto_tick_mode_) {
                         return send(MakeErrorResponse(
                             http::status::bad_request,
@@ -348,8 +370,8 @@ namespace http_handler {
                     return send(MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive()));
                 }
 
-                if (constexpr std::string_view api_prefix = "/api/v1/maps"; target.starts_with(api_prefix)) {
-                    if (target == api_prefix) {
+                if (target.starts_with(endpoints::MAPS)) {
+                    if (target == endpoints::MAPS) {
                         auto resp = MakeMapsListResponse(req.version(), req.keep_alive());
                         if (req.method() == http::verb::head) {
                             resp.prepare_payload();                            
@@ -357,8 +379,8 @@ namespace http_handler {
                         }
                         send(resp);
                         return;
-                    } else if (target[api_prefix.size()] == '/') {
-                        const std::string_view map_id_str = target.substr(api_prefix.size() + 1);
+                    } else if (target[endpoints::MAPS.size()] == '/') {
+                        const std::string_view map_id_str = target.substr(endpoints::MAPS.size() + 1);
                         const model::Map::Id id{std::string(map_id_str)};
                         const auto* map = game_.FindMap(id);
 

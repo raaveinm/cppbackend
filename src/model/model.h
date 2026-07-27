@@ -343,10 +343,8 @@ public:
     }
 
     const Map* FindMap(const Map::Id& id) const noexcept {
-        if (const auto it = map_id_to_index_.find(id); it != map_id_to_index_.end()) {
-            return &maps_.at(it->second);
-        }
-        return nullptr;
+        const auto it = map_id_to_index_.find(id);
+        return (it != map_id_to_index_.end()) ? &maps_[it->second] : nullptr;
     }
 
     GameSession* FindSession(const Map::Id& id) noexcept {

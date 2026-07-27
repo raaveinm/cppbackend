@@ -3,6 +3,14 @@
 #include <stdexcept>
 #include <algorithm>
 
+namespace {
+
+constexpr double ROAD_OFFSET = 0.4;
+constexpr double EPSILON = 1e-7;
+constexpr double ZERO_SPEED_THRESHOLD = 1e-10;
+
+} // namespace
+
 namespace model {
 using namespace std::literals;
 
@@ -16,10 +24,10 @@ void Map::AddRoad(const Road& road) {
         double y = static_cast<double>(start.y);
 
         horizontal_road_boundaries_.push_back({
-            std::min(x1, x2) - 0.4,
-            y - 0.4,
-            std::max(x1, x2) + 0.4,
-            y + 0.4
+            std::min(x1, x2) - ROAD_OFFSET,
+            y - ROAD_OFFSET,
+            std::max(x1, x2) + ROAD_OFFSET,
+            y + ROAD_OFFSET
         });
     } else { // Vertical
         auto start = road.GetStart();
@@ -29,10 +37,10 @@ void Map::AddRoad(const Road& road) {
         double x = static_cast<double>(start.x);
 
         vertical_road_boundaries_.push_back({
-            x - 0.4,
-            std::min(y1, y2) - 0.4,
-            x + 0.4,
-            std::max(y1, y2) + 0.4
+            x - ROAD_OFFSET,
+            std::min(y1, y2) - ROAD_OFFSET,
+            x + ROAD_OFFSET,
+            std::max(y1, y2) + ROAD_OFFSET
         });
     }
 }
@@ -98,8 +106,8 @@ RoadBoundary Map::GetAllowedBoundaries(Point2D pt, Direction dir) const {
 
     auto check_and_add = [&](const std::vector<RoadBoundary>& boundaries) {
         for (const auto& b : boundaries) {
-            if (pt.x >= b.x1 - 1e-7 && pt.x <= b.x2 + 1e-7 &&
-                pt.y >= b.y1 - 1e-7 && pt.y <= b.y2 + 1e-7) {
+            if (pt.x >= b.x1 - EPSILON && pt.x <= b.x2 + EPSILON &&
+                pt.y >= b.y1 - EPSILON && pt.y <= b.y2 + EPSILON) {
                 current_roads.push_back(b);
             }
         }
@@ -126,19 +134,19 @@ RoadBoundary Map::GetAllowedBoundaries(Point2D pt, Direction dir) const {
 
         if (dir == Direction::NORTH || dir == Direction::SOUTH) {
             for (const auto& b : vertical_road_boundaries_) {
-                if (std::abs((b.x1 + b.x2) / 2.0 - pt.x) <= 0.4 + 1e-7) {
-                    if (b.y1 <= result.y2 + 1e-7 && b.y2 >= result.y1 - 1e-7) {
-                        if (b.y1 < result.y1 - 1e-7) { result.y1 = b.y1; expanded = true; }
-                        if (b.y2 > result.y2 + 1e-7) { result.y2 = b.y2; expanded = true; }
+                if (std::abs((b.x1 + b.x2) / 2.0 - pt.x) <= ROAD_OFFSET + EPSILON) {
+                    if (b.y1 <= result.y2 + EPSILON && b.y2 >= result.y1 - EPSILON) {
+                        if (b.y1 < result.y1 - EPSILON) { result.y1 = b.y1; expanded = true; }
+                        if (b.y2 > result.y2 + EPSILON) { result.y2 = b.y2; expanded = true; }
                     }
                 }
             }
         } else {
             for (const auto& b : horizontal_road_boundaries_) {
-                if (std::abs((b.y1 + b.y2) / 2.0 - pt.y) <= 0.4 + 1e-7) {
-                    if (b.x1 <= result.x2 + 1e-7 && b.x2 >= result.x1 - 1e-7) {
-                        if (b.x1 < result.x1 - 1e-7) { result.x1 = b.x1; expanded = true; }
-                        if (b.x2 > result.x2 + 1e-7) { result.x2 = b.x2; expanded = true; }
+                if (std::abs((b.y1 + b.y2) / 2.0 - pt.y) <= ROAD_OFFSET + EPSILON) {
+                    if (b.x1 <= result.x2 + EPSILON && b.x2 >= result.x1 - EPSILON) {
+                        if (b.x1 < result.x1 - EPSILON) { result.x1 = b.x1; expanded = true; }
+                        if (b.x2 > result.x2 + EPSILON) { result.x2 = b.x2; expanded = true; }
                     }
                 }
             }
@@ -151,7 +159,7 @@ RoadBoundary Map::GetAllowedBoundaries(Point2D pt, Direction dir) const {
 void Dog::Tick(const std::chrono::milliseconds delta_t) {
     const auto delta_seconds = std::chrono::duration_cast<std::chrono::duration<double>>(delta_t).count();
 
-    if (abs(speed_.x) < 1e-10 && abs(speed_.y) < 1e-10)
+    if (abs(speed_.x) < ZERO_SPEED_THRESHOLD && abs(speed_.y) < ZERO_SPEED_THRESHOLD)
         return;
 
     Point2D proposed_pos{};
@@ -165,7 +173,7 @@ void Dog::Tick(const std::chrono::milliseconds delta_t) {
     clamped_pos.x = std::clamp(proposed_pos.x, boundary.x1, boundary.x2);
     clamped_pos.y = std::clamp(proposed_pos.y, boundary.y1, boundary.y2);
 
-    if (std::abs(clamped_pos.x - proposed_pos.x) > 1e-10 || std::abs(clamped_pos.y - proposed_pos.y) > 1e-10) {
+    if (std::abs(clamped_pos.x - proposed_pos.x) > ZERO_SPEED_THRESHOLD || std::abs(clamped_pos.y - proposed_pos.y) > ZERO_SPEED_THRESHOLD) {
         speed_ = {0.0, 0.0};
     }
 

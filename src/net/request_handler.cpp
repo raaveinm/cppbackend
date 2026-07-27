@@ -2,6 +2,63 @@
 #include "http_server.h"
 #include <cstdio>
 
+namespace serialization {
+
+    json::array SerializeRoads(const model::Map::Roads& roads) {
+        json::array roads_arr;
+        for (const auto& road : roads) {
+            json::object road_obj;
+            road_obj["x0"] = road.GetStart().x;
+            road_obj["y0"] = road.GetStart().y;
+            if (road.IsHorizontal()) {
+                road_obj["x1"] = road.GetEnd().x;
+            } else {
+                road_obj["y1"] = road.GetEnd().y;
+            }
+            roads_arr.push_back(road_obj);
+        }
+        return roads_arr;
+    }
+
+    json::array SerializeBuildings(const model::Map::Buildings& buildings) {
+        json::array buildings_arr;
+        for (const auto& b : buildings) {
+            json::object b_obj;
+            b_obj["x"] = b.GetBounds().position.x;
+            b_obj["y"] = b.GetBounds().position.y;
+            b_obj["w"] = b.GetBounds().size.width;
+            b_obj["h"] = b.GetBounds().size.height;
+            buildings_arr.push_back(b_obj);
+        }
+        return buildings_arr;
+    }
+
+    json::array SerializeOffices(const model::Map::Offices& offices) {
+        json::array offices_arr;
+        for (const auto& office : offices) {
+            json::object o_obj;
+            o_obj["id"] = *office.GetId();
+            o_obj["x"] = office.GetPosition().x;
+            o_obj["y"] = office.GetPosition().y;
+            o_obj["offsetX"] = office.GetOffset().dx;
+            o_obj["offsetY"] = office.GetOffset().dy;
+            offices_arr.push_back(o_obj);
+        }
+        return offices_arr;
+    }
+
+    json::object SerializeMap(const model::Map& map) {
+        json::object map_obj;
+        map_obj["id"] = *map.GetId();
+        map_obj["name"] = map.GetName();
+        map_obj["roads"] = SerializeRoads(map.GetRoads());
+        map_obj["buildings"] = SerializeBuildings(map.GetBuildings());
+        map_obj["offices"] = SerializeOffices(map.GetOffices());
+        return map_obj;
+    }
+
+}
+
 namespace http_handler {
 
 std::string UrlDecode(std::string_view src) {
@@ -108,49 +165,7 @@ http::response<http::string_body> RequestHandler::MakeMapDescriptionResponse(con
     response.set(http::field::content_type, "application/json");
     response.set(http::field::cache_control, "no-cache");
     response.keep_alive(keep_alive);
-
-    json::object map_obj;
-    map_obj["id"] = *map.GetId();
-    map_obj["name"] = map.GetName();
-
-    json::array roads_arr;
-    for (const auto& road : map.GetRoads()) {
-        json::object road_obj;
-        road_obj["x0"] = road.GetStart().x;
-        road_obj["y0"] = road.GetStart().y;
-        if (road.IsHorizontal()) {
-            road_obj["x1"] = road.GetEnd().x;
-        } else {
-            road_obj["y1"] = road.GetEnd().y;
-        }
-        roads_arr.push_back(road_obj);
-    }
-    map_obj["roads"] = roads_arr;
-
-    json::array buildings_arr;
-    for (const auto& b : map.GetBuildings()) {
-        json::object b_obj;
-        b_obj["x"] = b.GetBounds().position.x;
-        b_obj["y"] = b.GetBounds().position.y;
-        b_obj["w"] = b.GetBounds().size.width;
-        b_obj["h"] = b.GetBounds().size.height;
-        buildings_arr.push_back(b_obj);
-    }
-    map_obj["buildings"] = buildings_arr;
-
-    json::array offices_arr;
-    for (const auto& office : map.GetOffices()) {
-        json::object o_obj;
-        o_obj["id"] = *office.GetId();
-        o_obj["x"] = office.GetPosition().x;
-        o_obj["y"] = office.GetPosition().y;
-        o_obj["offsetX"] = office.GetOffset().dx;
-        o_obj["offsetY"] = office.GetOffset().dy;
-        offices_arr.push_back(o_obj);
-    }
-    map_obj["offices"] = offices_arr;
-
-    response.body() = json::serialize(map_obj);
+    response.body() = json::serialize(serialization::SerializeMap(map));
     response.prepare_payload();
     return response;
 }
