@@ -1,0 +1,6 @@
+[Host: localhost]
+[Connection: close]
+[User-Agent: YandexTank]
+
+/api/v1/maps
+/api/v1/maps/map1
