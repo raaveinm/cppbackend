@@ -376,11 +376,13 @@ namespace http_handler {
                     }
                 }
 
-                if (req.method() != http::verb::get && req.method() != http::verb::head) {
-                    return send(MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive()));
-                }
-
                 if (target.starts_with(endpoints::MAPS)) {
+                    if (req.method() != http::verb::get && req.method() != http::verb::head) {
+                        auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive());
+                        resp.set(http::field::allow, "GET, HEAD");
+                        return send(resp);
+                    }
+
                     if (target == endpoints::MAPS) {
                         auto resp = MakeMapsListResponse(req.version(), req.keep_alive());
                         if (req.method() == http::verb::head) {
