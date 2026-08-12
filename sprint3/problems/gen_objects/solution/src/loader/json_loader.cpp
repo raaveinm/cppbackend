@@ -69,17 +69,19 @@ model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& io
         throw std::runtime_error("Failed to parse JSON config file: "s + e.what());
     }
 
-    model::Game game(ioc, randomize_spawn_points, random_generator);
-
-    if (const auto* dog_speed_ptr = value.as_object().if_contains("defaultDogSpeed")) {
-        game.SetDefaultDogSpeed(dog_speed_ptr->as_double());
-    }
+    double loot_period = 5.0;
+    double loot_probability = 0.5;
 
     if (const auto* loot_gen_config_ptr = value.as_object().if_contains("lootGeneratorConfig")) {
         const auto& loot_gen_config_obj = loot_gen_config_ptr->as_object();
-        double period = loot_gen_config_obj.at("period").as_double();
-        double probability = loot_gen_config_obj.at("probability").as_double();
-        game.SetLootGeneratorConfig(period, probability);
+        loot_period = loot_gen_config_obj.at("period").as_double();
+        loot_probability = loot_gen_config_obj.at("probability").as_double();
+    }
+
+    model::Game game(ioc, randomize_spawn_points, random_generator, loot_period, loot_probability);
+
+    if (const auto* dog_speed_ptr = value.as_object().if_contains("defaultDogSpeed")) {
+        game.SetDefaultDogSpeed(dog_speed_ptr->as_double());
     }
 
     for (const auto& maps_array = value.as_object().at("maps").as_array();
@@ -95,7 +97,7 @@ model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& io
         }
 
         if (const auto* loot_types_ptr = map_obj.if_contains("lootTypes")) {
-            map.SetLootTypeCount(loot_types_ptr->as_array().size());
+            map.SetLootTypes(loot_types_ptr->as_array());
             extra_data.AddLootTypes(map, loot_types_ptr->as_array());
         }
 
