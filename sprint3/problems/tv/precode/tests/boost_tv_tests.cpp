@@ -18,7 +18,7 @@ BOOST_AUTO_TEST_CASE(doesnt_show_any_channel_by_default) {
     BOOST_TEST(!tv.GetChannel().has_value());
 }
 // Включите этот тест и доработайте класс TV, чтобы тест выполнился успешно
-#if 0
+#if 1
 BOOST_AUTO_TEST_CASE(cant_select_any_channel_when_it_is_off) {
     BOOST_CHECK_THROW(tv.SelectChannel(10), std::logic_error);
     BOOST_TEST(tv.GetChannel() == std::nullopt);
@@ -49,8 +49,29 @@ BOOST_AUTO_TEST_CASE(can_be_turned_off) {
 }
 // Может выбирать каналы с 1 по 99
 BOOST_AUTO_TEST_CASE(can_select_channel_from_1_to_99) {
-    /* Реализуйте самостоятельно этот тест */
+    tv.SelectChannel(50);
+    BOOST_TEST(tv.GetChannel() == 50);
+    tv.SelectChannel(99);
+    BOOST_TEST(tv.GetChannel() == 99);
+    tv.SelectChannel(1);
+    BOOST_TEST(tv.GetChannel() == 1);
 }
+
+BOOST_AUTO_TEST_CASE(cant_select_channel_out_of_range) {
+    BOOST_CHECK_THROW(tv.SelectChannel(0), std::out_of_range);
+    BOOST_CHECK_THROW(tv.SelectChannel(100), std::out_of_range);
+    BOOST_TEST(tv.GetChannel() == 1);
+}
+
+BOOST_AUTO_TEST_CASE(can_select_last_viewed_channel) {
+    tv.SelectChannel(42);
+    tv.SelectChannel(10);
+    tv.SelectLastViewedChannel();
+    BOOST_TEST(tv.GetChannel() == 42);
+    tv.SelectLastViewedChannel();
+    BOOST_TEST(tv.GetChannel() == 10);
+}
+
 /* Реализуйте остальные тесты класса TV */
 BOOST_AUTO_TEST_SUITE_END()
 BOOST_AUTO_TEST_SUITE_END()

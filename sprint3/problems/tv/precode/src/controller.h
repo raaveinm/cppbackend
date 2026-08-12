@@ -48,14 +48,8 @@ private:
 
         if (EnsureNoArgsInInput(INFO_COMMAND, input, output)) {
             if (tv_.IsTurnedOn()) {
-                // Эта часть метода не реализована. Реализуйте её самостоятельно
-                assert(!"Controller::ShowInfo is not implemented when TV is turned on");
-                /*
-                Выведите две строки, завершая каждую std::endl:
-
-                TV is turned on
-                Channel number is <номер канала>
-                */
+                output << "TV is turned on"sv << std::endl;
+                output << "Channel number is "sv << *tv_.GetChannel() << std::endl;
             } else {
                 output << "TV is turned off"sv << std::endl;
             }
@@ -103,8 +97,20 @@ private:
      * - "TV is turned off", если TV::SelectChannel выбросил std::logic_error
      */
     [[nodiscard]] bool SelectChannel(std::istream& input, std::ostream& output) const {
-        /* Реализуйте самостоятельно этот метод.*/
-        assert(!"TODO: Implement Controller::SelectChannel");
+        using namespace std::literals;
+        int channel;
+        input >> channel;
+        if (input.fail()) {
+            output << "Invalid channel"sv << std::endl;
+            return true;
+        }
+        try {
+            tv_.SelectChannel(channel);
+        } catch (const std::logic_error& e) {
+            output << "TV is turned off" << std::endl;
+        } catch (const std::out_of_range& e) {
+            output << "Channel is out of range" << std::endl;
+        }
         return true;
     }
 
@@ -114,8 +120,14 @@ private:
      * "TV is turned off"
      */
     [[nodiscard]] bool SelectPreviousChannel(std::istream& input, std::ostream& output) const {
-        /* Реализуйте самостоятельно этот метод */
-        assert(!"TODO: Implement Controller::SelectPreviousChannel");
+        using namespace std::literals;
+        if (EnsureNoArgsInInput(SELECT_PREVIOUS_CHANNEL_COMMAND, input, output)) {
+            try {
+                tv_.SelectLastViewedChannel();
+            } catch (const std::logic_error& e) {
+                output << "TV is turned off" << std::endl;
+            }
+        }
         return true;
     }
 

@@ -1,5 +1,6 @@
 phantom:
   address: 127.0.0.1:8080
+  connection_test: false
   uris:
     - /
   load_profile:
