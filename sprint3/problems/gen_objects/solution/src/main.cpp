@@ -104,8 +104,7 @@ int main(int argc, const char* argv[]) {
         // Загружаем карту из файла и строим модель игры
         extra_data::ExtraData extra_data;
         auto random_generator = [] {
-            std::random_device rd;
-            std::mt19937 gen(rd());
+            thread_local std::mt19937 gen{std::random_device{}()};
             std::uniform_real_distribution<> dis(0.0, 1.0);
             return dis(gen);
         };
