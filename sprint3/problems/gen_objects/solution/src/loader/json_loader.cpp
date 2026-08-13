@@ -78,7 +78,8 @@ model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& io
         loot_probability = loot_gen_config_obj.at("probability").as_double();
     }
 
-    model::Game game(ioc, randomize_spawn_points, random_generator, loot_period, loot_probability);
+    model::Game game(ioc, randomize_spawn_points, random_generator);
+    game.SetLootGeneratorConfig(loot_period, loot_probability);
 
     if (const auto* dog_speed_ptr = value.as_object().if_contains("defaultDogSpeed")) {
         game.SetDefaultDogSpeed(dog_speed_ptr->as_double());
@@ -97,8 +98,9 @@ model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& io
         }
 
         if (const auto* loot_types_ptr = map_obj.if_contains("lootTypes")) {
-            map.SetLootTypes(loot_types_ptr->as_array());
-            extra_data.AddLootTypes(map, loot_types_ptr->as_array());
+            const auto& loot_types_array = loot_types_ptr->as_array();
+            map.SetLootTypeCount(loot_types_array.size());
+            extra_data.AddLootTypes(map, loot_types_array);
         }
 
         // region deserialisation
