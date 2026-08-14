@@ -1,0 +1,455 @@
+#include "model.h"
+
+#include <stdexcept>
+#include <algorithm>
+
+namespace {
+
+constexpr double ROAD_OFFSET = 0.4;
+constexpr double EPSILON = 1e-7;
+constexpr double ZERO_SPEED_THRESHOLD = 1e-10;
+
+constexpr double DOG_RADIUS = 0.3;
+constexpr double ITEM_RADIUS = 0.0;
+constexpr double BASE_RADIUS = 0.25;
+
+} // namespace
+
+namespace model {
+using namespace std::literals;
+
+void Map::AddRoad(const Road& road) {
+    roads_.emplace_back(road);
+    if (road.IsHorizontal()) {
+        auto start = road.GetStart();
+        auto end = road.GetEnd();
+        double x1 = static_cast<double>(start.x);
+        double x2 = static_cast<double>(end.x);
+        double y = static_cast<double>(start.y);
+
+        horizontal_road_boundaries_.push_back({
+            std::min(x1, x2) - ROAD_OFFSET,
+            y - ROAD_OFFSET,
+            std::max(x1, x2) + ROAD_OFFSET,
+            y + ROAD_OFFSET
+        });
+    } else { // Vertical
+        auto start = road.GetStart();
+        auto end = road.GetEnd();
+        double y1 = static_cast<double>(start.y);
+        double y2 = static_cast<double>(end.y);
+        double x = static_cast<double>(start.x);
+
+        vertical_road_boundaries_.push_back({
+            x - ROAD_OFFSET,
+            std::min(y1, y2) - ROAD_OFFSET,
+            x + ROAD_OFFSET,
+            std::max(y1, y2) + ROAD_OFFSET
+        });
+    }
+}
+
+uint64_t Player::player_id_s = 0;
+
+void Map::AddOffice(Office office) {
+    if (warehouse_id_to_index_.contains(office.GetId())) {
+        throw std::invalid_argument("Duplicate warehouse");
+    }
+
+    const size_t index = offices_.size();
+    Office& o = offices_.emplace_back(std::move(office));
+    try {
+        warehouse_id_to_index_.emplace(o.GetId(), index);
+    } catch (...) {
+        offices_.pop_back();
+        throw;
+    }
+}
+
+Point2D Map::GetRandomPointOnRoads() const {
+    if (roads_.empty()) {
+        return {0.0, 0.0};
+    }
+
+    thread_local std::mt19937 generator{std::random_device{}()};
+
+    std::uniform_int_distribution<size_t> road_dist(0, roads_.size() - 1);
+    const auto& road = roads_[road_dist(generator)];
+
+    if (road.IsHorizontal()) {
+        const double min_x = std::min(road.GetStart().x, road.GetEnd().x);
+        const double max_x = std::max(road.GetStart().x, road.GetEnd().x);
+        std::uniform_real_distribution<double> coord_dist(min_x, max_x);
+        return {coord_dist(generator), static_cast<double>(road.GetStart().y)};
+    } else {
+        const double min_y = std::min(road.GetStart().y, road.GetEnd().y);
+        const double max_y = std::max(road.GetStart().y, road.GetEnd().y);
+        std::uniform_real_distribution<double> coord_dist(min_y, max_y);
+        return {static_cast<double>(road.GetStart().x), coord_dist(generator)};
+    }
+}
+
+size_t Map::GetRandomLootType() const {
+    if (loot_type_count_ == 0) {
+        return 0;
+    }
+    thread_local std::mt19937 generator{std::random_device{}()};
+    std::uniform_int_distribution<size_t> loot_type_dist(0, loot_type_count_ - 1);
+    return loot_type_dist(generator);
+}
+
+bool Map::IsOnRoad(Point2D pt) const {
+    for (const auto& boundary : horizontal_road_boundaries_) {
+        if (pt.x >= boundary.x1 && pt.x <= boundary.x2 &&
+            pt.y >= boundary.y1 && pt.y <= boundary.y2) {
+            return true;
+        }
+    }
+    for (const auto& boundary : vertical_road_boundaries_) {
+        if (pt.x >= boundary.x1 && pt.x <= boundary.x2 &&
+            pt.y >= boundary.y1 && pt.y <= boundary.y2) {
+            return true;
+        }
+    }
+    return false;
+}
+
+RoadBoundary Map::GetAllowedBoundaries(Point2D pt, Direction dir) const {
+    std::vector<RoadBoundary> current_roads;
+
+    auto check_and_add = [&](const std::vector<RoadBoundary>& boundaries) {
+        for (const auto& b : boundaries) {
+            if (pt.x >= b.x1 - EPSILON && pt.x <= b.x2 + EPSILON &&
+                pt.y >= b.y1 - EPSILON && pt.y <= b.y2 + EPSILON) {
+                current_roads.push_back(b);
+            }
+        }
+    };
+
+    check_and_add(horizontal_road_boundaries_);
+    check_and_add(vertical_road_boundaries_);
+
+    if (current_roads.empty()) {
+        return {pt.x, pt.y, pt.x, pt.y};
+    }
+
+    RoadBoundary result = current_roads.front();
+    for (const auto& b : current_roads) {
+        result.x1 = std::min(result.x1, b.x1);
+        result.x2 = std::max(result.x2, b.x2);
+        result.y1 = std::min(result.y1, b.y1);
+        result.y2 = std::max(result.y2, b.y2);
+    }
+
+    bool expanded = true;
+    while (expanded) {
+        expanded = false;
+
+        if (dir == Direction::NORTH || dir == Direction::SOUTH) {
+            for (const auto& b : vertical_road_boundaries_) {
+                if (std::abs((b.x1 + b.x2) / 2.0 - pt.x) <= ROAD_OFFSET + EPSILON) {
+                    if (b.y1 <= result.y2 + EPSILON && b.y2 >= result.y1 - EPSILON) {
+                        if (b.y1 < result.y1 - EPSILON) { result.y1 = b.y1; expanded = true; }
+                        if (b.y2 > result.y2 + EPSILON) { result.y2 = b.y2; expanded = true; }
+                    }
+                }
+            }
+        } else {
+            for (const auto& b : horizontal_road_boundaries_) {
+                if (std::abs((b.y1 + b.y2) / 2.0 - pt.y) <= ROAD_OFFSET + EPSILON) {
+                    if (b.x1 <= result.x2 + EPSILON && b.x2 >= result.x1 - EPSILON) {
+                        if (b.x1 < result.x1 - EPSILON) { result.x1 = b.x1; expanded = true; }
+                        if (b.x2 > result.x2 + EPSILON) { result.x2 = b.x2; expanded = true; }
+                    }
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+void Dog::Tick(const std::chrono::milliseconds delta_t) {
+    const auto delta_seconds = std::chrono::duration_cast<std::chrono::duration<double>>(delta_t).count();
+
+    if (abs(speed_.x) < ZERO_SPEED_THRESHOLD && abs(speed_.y) < ZERO_SPEED_THRESHOLD)
+        return;
+
+    Point2D proposed_pos{};
+    proposed_pos.x = position_.x + speed_.x * delta_seconds;
+    proposed_pos.y = position_.y + speed_.y * delta_seconds;
+
+    const auto* map = session_->GetMap();
+    auto boundary = map->GetAllowedBoundaries(position_, direction_);
+
+    Point2D clamped_pos = proposed_pos;
+    clamped_pos.x = std::clamp(proposed_pos.x, boundary.x1, boundary.x2);
+    clamped_pos.y = std::clamp(proposed_pos.y, boundary.y1, boundary.y2);
+
+    if (std::abs(clamped_pos.x - proposed_pos.x) > ZERO_SPEED_THRESHOLD || std::abs(clamped_pos.y - proposed_pos.y) > ZERO_SPEED_THRESHOLD) {
+        speed_ = {0.0, 0.0};
+    }
+
+    position_ = clamped_pos;
+}
+
+void GameSession::Tick(std::chrono::milliseconds delta_t, bool sync) {
+    auto tick_action = [this, delta_t]() {
+        if (loot_generator_) {
+            unsigned int loot_count = loot_generator_->Generate(delta_t, lost_objects_.size(), dogs_.size());
+            for (unsigned int i = 0; i < loot_count; ++i) {
+                lost_objects_.emplace(lost_object_id_, LostObject{
+                    lost_object_id_,
+                    map_->GetRandomLootType(),
+                    map_->GetRandomPointOnRoads()
+                });
+                lost_object_id_++;
+            }
+        }
+
+        std::vector<Point2D> start_positions;
+        start_positions.reserve(dogs_.size());
+        for (auto& dog : dogs_) {
+            start_positions.push_back(dog->GetPosition());
+        }
+
+        for (auto& dog : dogs_) {
+            dog->Tick(delta_t);
+        }
+
+        ProcessCollisions(start_positions);
+    };
+
+    if (sync) {
+        tick_action();
+    } else {
+        Dispatch(tick_action);
+    }
+}
+
+namespace {
+
+geom::Point2D ToGeom(Point2D pt) {
+    return {pt.x, pt.y};
+}
+
+class LostObjectProvider final : public collision_detector::ItemGathererProvider {
+public:
+    LostObjectProvider(std::vector<uint32_t> item_ids, const GameSession::LostObjects& lost_objects,
+                        const GameSession::Dogs& dogs, const std::vector<Point2D>& start_positions)
+        : item_ids_{std::move(item_ids)}, lost_objects_{lost_objects}, dogs_{dogs}, start_positions_{start_positions} {}
+
+    size_t ItemsCount() const override { return item_ids_.size(); }
+
+    collision_detector::Item GetItem(size_t idx) const override {
+        return {ToGeom(lost_objects_.at(item_ids_[idx]).pos), ITEM_RADIUS};
+    }
+
+    size_t GatherersCount() const override { return dogs_.size(); }
+
+    collision_detector::Gatherer GetGatherer(size_t idx) const override {
+        return {ToGeom(start_positions_[idx]), ToGeom(dogs_[idx]->GetPosition()), DOG_RADIUS};
+    }
+
+private:
+    std::vector<uint32_t> item_ids_;
+    const GameSession::LostObjects& lost_objects_;
+    const GameSession::Dogs& dogs_;
+    const std::vector<Point2D>& start_positions_;
+};
+
+class BaseProvider final : public collision_detector::ItemGathererProvider {
+public:
+    BaseProvider(const Map::Offices& offices, const GameSession::Dogs& dogs, const std::vector<Point2D>& start_positions)
+        : offices_{offices}, dogs_{dogs}, start_positions_{start_positions} {}
+
+    size_t ItemsCount() const override { return offices_.size(); }
+
+    collision_detector::Item GetItem(size_t idx) const override {
+        const auto pos = offices_[idx].GetPosition();
+        return {geom::Point2D{static_cast<double>(pos.x), static_cast<double>(pos.y)}, BASE_RADIUS};
+    }
+
+    size_t GatherersCount() const override { return dogs_.size(); }
+
+    collision_detector::Gatherer GetGatherer(size_t idx) const override {
+        return {ToGeom(start_positions_[idx]), ToGeom(dogs_[idx]->GetPosition()), DOG_RADIUS};
+    }
+
+private:
+    const Map::Offices& offices_;
+    const GameSession::Dogs& dogs_;
+    const std::vector<Point2D>& start_positions_;
+};
+
+}  // namespace
+
+void GameSession::ProcessCollisions(const std::vector<Point2D>& start_positions) {
+    std::vector<uint32_t> item_ids;
+    item_ids.reserve(lost_objects_.size());
+    for (const auto& [id, obj] : lost_objects_) {
+        item_ids.push_back(id);
+    }
+
+    struct MergedEvent {
+        double time;
+        bool is_base;
+        size_t gatherer_id;
+        size_t target_idx;
+    };
+    std::vector<MergedEvent> merged;
+
+    if (!item_ids.empty()) {
+        LostObjectProvider provider{item_ids, lost_objects_, dogs_, start_positions};
+        for (const auto& event : collision_detector::FindGatherEvents(provider)) {
+            merged.push_back({event.time, false, event.gatherer_id, event.item_id});
+        }
+    }
+
+    if (!map_->GetOffices().empty()) {
+        BaseProvider provider{map_->GetOffices(), dogs_, start_positions};
+        for (const auto& event : collision_detector::FindGatherEvents(provider)) {
+            merged.push_back({event.time, true, event.gatherer_id, event.item_id});
+        }
+    }
+
+    std::sort(merged.begin(), merged.end(), [](const MergedEvent& lhs, const MergedEvent& rhs) {
+        return lhs.time < rhs.time;
+    });
+
+    for (const auto& event : merged) {
+        Dog* dog = dogs_[event.gatherer_id].get();
+        if (event.is_base) {
+            dog->EmptyBag();
+        } else {
+            const uint32_t item_id = item_ids[event.target_idx];
+            const auto it = lost_objects_.find(item_id);
+            if (it == lost_objects_.end() || dog->IsBagFull()) {
+                continue;
+            }
+            dog->CollectItem(BagItem{item_id, it->second.type});
+            lost_objects_.erase(it);
+        }
+    }
+}
+
+void Game::AddMap(Map map) {
+    map.SetDefaultDogSpeed(default_dog_speed_);
+    map.SetDefaultBagCapacity(default_bag_capacity_);
+    const size_t index = maps_.size();
+    if (auto [it, inserted] = map_id_to_index_.emplace(map.GetId(), index); !inserted) {
+        throw std::invalid_argument("Map with id "s + *map.GetId() + " already exists"s);
+    } else {
+        try {
+            maps_.emplace_back(std::move(map));
+        } catch (...) {
+            map_id_to_index_.erase(it);
+            throw;
+        }
+    }
+}
+
+void Game::Tick(std::chrono::milliseconds delta_t) {
+    for (auto& session : sessions_) {
+        session->Tick(delta_t);
+    }
+}
+
+Dog* GameSession::AddDog(const std::string& name) {
+    Point2D pos{};
+    if (randomize_spawn_points_) {
+        pos = map_->GetRandomPointOnRoads();
+    } else {
+        auto start_point = map_->GetRoads().front().GetStart();
+        pos = {static_cast<double>(start_point.x), static_cast<double>(start_point.y)};
+    }
+    dogs_.emplace_back(std::make_unique<Dog>(Dog::Id{dog_id_++}, name, pos, this, map_->GetBagCapacity()));
+    return dogs_.back().get();
+}
+
+std::pair<Player&, Token> Game::AddPlayer(const Map::Id& map_id, const std::string& player_name) {
+    auto* map = const_cast<Map*>(FindMap(map_id));
+    if (!map) {
+        throw std::invalid_argument("Map not found");
+    }
+
+    auto* session = FindSession(map_id);
+    if (!session) {
+        sessions_.emplace_back(std::make_unique<GameSession>(map, ioc_, randomize_spawn_points_, random_generator_, loot_generator_config_));
+        map_id_to_session_index_[map_id] = sessions_.size() - 1;
+        session = sessions_.back().get();
+    }
+
+    auto* dog = session->AddDog(player_name);
+    auto& player = players_.Add(dog, session);
+    auto token = player_tokens_.AddPlayer(player);
+
+    return {player, token};
+}
+
+Player::Player(Dog* dog, GameSession* session)
+    : id_{player_id_s++}, dog_{dog}, session_{session} {}
+
+const PlayerId& Player::GetId() const noexcept {
+    return id_;
+}
+
+const std::string& Player::GetName() const noexcept {
+    return GetDog()->GetName();
+}
+
+Dog* Player::GetDog() const noexcept {
+    return dog_;
+}
+
+GameSession* Player::GetSession() const noexcept {
+    return session_;
+}
+
+Token PlayerTokens::AddPlayer(Player& player) {
+    const auto token_str = generator_.GenerateToken();
+    Token token{token_str}; // Convert to model::Token
+    token_to_player_.emplace(token, &player);
+    return token;
+}
+
+Player* PlayerTokens::FindPlayerByToken(const Token& token) {
+    if (token_to_player_.contains(token)) {
+        return token_to_player_.at(token);
+    }
+    return nullptr;
+}
+
+Player& Players::Add(Dog* dog, GameSession* session) {
+    players_.emplace_back(std::make_unique<Player>(dog, session));
+    return *players_.back();
+}
+
+const Player* Players::FindByDogIdAndMapId(const Dog::Id& dog_id, const Map::Id& map_id) const {
+    for (const auto& player : players_) {
+        if (player->GetDog()->GetId() == dog_id && player->GetSession()->GetMap()->GetId() == map_id) {
+            return player.get();
+        }
+    }
+    return nullptr;
+}
+
+const Player* Players::FindById(const PlayerId& id) const {
+    for (const auto& player : players_) {
+        if (player->GetId() == id) {
+            return player.get();
+        }
+    }
+    return nullptr;
+}
+
+Player* Game::FindPlayerByToken(const Token& token) {
+    return player_tokens_.FindPlayerByToken(token);
+}
+
+const std::vector<std::unique_ptr<Player>>& Game::GetPlayers() const {
+    return players_.GetPlayers();
+}
+
+
+}  // namespace model
