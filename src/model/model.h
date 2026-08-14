@@ -9,10 +9,11 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
 
-namespace net = boost::asio;
-
 #include "../util/tagged.h"
 #include "../util/token_generator.h"
+#include "../loot_generator.h"
+#include "../geom.h"
+#include "../collision_detector.h"
 
 namespace model {
 
@@ -55,6 +56,17 @@ struct Point2D {
 
 struct Speed2D {
     double x, y;
+};
+
+struct LostObject {
+    uint32_t id;
+    size_t type;
+    Point2D pos;
+};
+
+struct BagItem {
+    uint32_t id;
+    size_t type;
 };
 
 enum class Direction {
@@ -191,6 +203,7 @@ public:
     void AddOffice(Office office);
 
     Point2D GetRandomPointOnRoads() const;
+    size_t GetRandomLootType() const;
 
     double GetDogSpeed() const {
         return dog_speed_.value_or(default_dog_speed_);
@@ -202,6 +215,34 @@ public:
 
     void SetDogSpeed(double speed) {
         dog_speed_ = speed;
+    }
+
+    void SetLootTypeCount(size_t count) {
+        loot_type_count_ = count;
+    }
+
+    size_t GetLootTypeCount() const {
+        return loot_type_count_;
+    }
+
+    void SetLootTypeValues(std::vector<unsigned> values) {
+        loot_type_values_ = std::move(values);
+    }
+
+    unsigned GetLootTypeValue(size_t type) const {
+        return type < loot_type_values_.size() ? loot_type_values_[type] : 0u;
+    }
+
+    size_t GetBagCapacity() const {
+        return bag_capacity_.value_or(default_bag_capacity_);
+    }
+
+    void SetDefaultBagCapacity(size_t capacity) {
+        default_bag_capacity_ = capacity;
+    }
+
+    void SetBagCapacity(size_t capacity) {
+        bag_capacity_ = capacity;
     }
 
     bool IsOnRoad(Point2D pt) const;
@@ -226,6 +267,10 @@ private:
     std::vector<RoadBoundary> vertical_road_boundaries_;
     std::optional<double> dog_speed_;
     double default_dog_speed_ = 1.0;
+    size_t loot_type_count_ = 0;
+    std::vector<unsigned> loot_type_values_;
+    std::optional<size_t> bag_capacity_;
+    size_t default_bag_capacity_ = 3;
 
     OfficeIdToIndex warehouse_id_to_index_;
     Offices offices_;
@@ -237,19 +282,47 @@ class Player;
 class Dog {
 public:
     using Id = util::Tagged<uint64_t, Dog>;
+    using Bag = std::vector<BagItem>;
 
-    Dog(Id id, std::string name, Point2D position, GameSession* session) noexcept
-        : id_{id}, name_{std::move(name)}, position_{position}, session_{session} {}
+    Dog(Id id, std::string name, Point2D position, GameSession* session, size_t bag_capacity) noexcept
+        : id_{id}, name_{std::move(name)}, position_{position}, session_{session}, bag_capacity_{bag_capacity} {}
 
     const Id& GetId() const noexcept { return id_; }
     const std::string& GetName() const noexcept { return name_; }
     const Point2D& GetPosition() const noexcept { return position_; }
     const Speed2D& GetSpeed() const noexcept { return speed_; }
     Direction GetDirection() const noexcept { return direction_; }
+    const Bag& GetBag() const noexcept { return bag_; }
+    unsigned GetScore() const noexcept { return score_; }
 
     void SetPosition(Point2D position) { position_ = position; }
     void SetSpeed(Speed2D speed) { speed_ = speed; }
     void SetDirection(Direction direction) { direction_ = direction; }
+
+    bool IsBagFull() const noexcept { return bag_.size() >= bag_capacity_; }
+
+    bool CollectItem(BagItem item) {
+        if (IsBagFull()) {
+            return false;
+        }
+        bag_.push_back(item);
+        return true;
+    }
+
+    void EmptyBag() { bag_.clear(); }
+
+    // Returns the bag contents to the base: adds up the value of every item
+    // in the bag using the map's per-type values, credits it to the score,
+    // and empties the bag.
+    unsigned DropOffItems(const Map& map) {
+        unsigned total_value = 0;
+        for (const auto& item : bag_) {
+            total_value += map.GetLootTypeValue(item.type);
+        }
+        score_ += total_value;
+        bag_.clear();
+        return total_value;
+    }
 
     void Tick(std::chrono::milliseconds delta_t);
 
@@ -260,32 +333,56 @@ private:
     Speed2D speed_ = {0.0, 0.0};
     Direction direction_ = Direction::NORTH;
     GameSession* session_;
+    Bag bag_;
+    size_t bag_capacity_;
+    unsigned score_ = 0;
 };
 
 
 class GameSession {
 public:
     using Dogs = std::vector<std::unique_ptr<Dog>>;
+    using LostObjects = std::unordered_map<uint32_t, LostObject>;
+    using LootGenerator = loot_gen::LootGenerator;
 
-    explicit GameSession(const Map* map, net::io_context& ioc, bool randomize_spawn_points)
-        : map_{map}, strand_{net::make_strand(ioc)}, randomize_spawn_points_{randomize_spawn_points} {}
+    explicit GameSession(const Map* map, net::io_context& ioc, bool randomize_spawn_points,
+                         LootGenerator::RandomGenerator random_generator,
+                         const std::optional<std::pair<double, double>>& loot_generator_config)
+        : map_{map}, strand_{net::make_strand(ioc)}, randomize_spawn_points_{randomize_spawn_points} {
+        if (loot_generator_config) {
+            loot_generator_ = std::make_unique<loot_gen::LootGenerator>(
+                std::chrono::milliseconds(static_cast<long long>(loot_generator_config->first * 1000)),
+                loot_generator_config->second,
+                random_generator);
+        }
+    }
 
     const Map* GetMap() const noexcept { return map_; }
     const Dogs& GetDogs() const { return dogs_; }
     Dog* AddDog(const std::string& name);
 
-    void Tick(std::chrono::milliseconds delta_t);
+    void Tick(std::chrono::milliseconds delta_t, bool sync = false);
 
     template <typename Handler>
     void Dispatch(Handler&& handler) {
         net::dispatch(strand_, std::forward<Handler>(handler));
     }
+
+    const LostObjects& GetLostObjects() const {
+        return lost_objects_;
+    }
+
 private:
+    void ProcessCollisions(const std::vector<Point2D>& start_positions);
+
     const Map* map_;
     Dogs dogs_;
     uint64_t dog_id_ = 0;
     net::strand<net::io_context::executor_type> strand_;
     bool randomize_spawn_points_ = false;
+    LostObjects lost_objects_;
+    uint32_t lost_object_id_ = 0;
+    std::unique_ptr<loot_gen::LootGenerator> loot_generator_;
 };
 
 class Player {
@@ -331,9 +428,10 @@ class Game {
 public:
     using Maps = std::vector<Map>;
     using GameSessions = std::vector<std::unique_ptr<GameSession>>;
+    using LootGenerator = loot_gen::LootGenerator;
 
-    explicit Game(net::io_context& ioc, bool randomize_spawn_points)
-        : ioc_{ioc}, randomize_spawn_points_{randomize_spawn_points} {}
+    explicit Game(net::io_context& ioc, bool randomize_spawn_points, LootGenerator::RandomGenerator random_generator)
+        : ioc_{ioc}, randomize_spawn_points_{randomize_spawn_points}, random_generator_{std::move(random_generator)} {}
 
     void AddMap(Map map);
     void Tick(std::chrono::milliseconds delta_t);
@@ -367,6 +465,22 @@ public:
         default_dog_speed_ = speed;
     }
 
+    size_t GetDefaultBagCapacity() const noexcept {
+        return default_bag_capacity_;
+    }
+
+    void SetDefaultBagCapacity(size_t capacity) noexcept {
+        default_bag_capacity_ = capacity;
+    }
+
+    void SetLootGeneratorConfig(double period, double probability) {
+        loot_generator_config_ = {period, probability};
+    }
+
+    const auto& GetLootGeneratorConfig() const {
+        return loot_generator_config_;
+    }
+
 
 private:
     using MapIdHasher = util::TaggedHasher<Map::Id>;
@@ -384,7 +498,10 @@ private:
     Players players_;
     PlayerTokens player_tokens_;
     double default_dog_speed_ = 1.0;
+    size_t default_bag_capacity_ = 3;
     bool randomize_spawn_points_ = false;
+    std::optional<std::pair<double, double>> loot_generator_config_;
+    LootGenerator::RandomGenerator random_generator_;
 };
 
 }  // namespace model

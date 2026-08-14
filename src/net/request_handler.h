@@ -12,6 +12,7 @@
 
 #include "../util/logging.h"
 #include "../model/model.h"
+#include "../extra_data.h"
 
 namespace serialization {
     namespace json = boost::json;
@@ -19,7 +20,7 @@ namespace serialization {
     json::array SerializeRoads(const model::Map::Roads& roads);
     json::array SerializeBuildings(const model::Map::Buildings& buildings);
     json::array SerializeOffices(const model::Map::Offices& offices);
-    json::object SerializeMap(const model::Map& map);
+    json::object SerializeMap(const model::Map& map, const extra_data::ExtraData& extra_data);
 }
 
 namespace http_handler {
@@ -101,7 +102,7 @@ namespace http_handler {
 
     class RequestHandler {
     public:
-        explicit RequestHandler(model::Game& game, std::filesystem::path static_path, bool auto_tick_mode = false);
+        explicit RequestHandler(model::Game& game, extra_data::ExtraData& extra_data, std::filesystem::path static_path, bool auto_tick_mode = false);
 
         RequestHandler(const RequestHandler&) = delete;
         RequestHandler& operator=(const RequestHandler&) = delete;
@@ -221,8 +222,9 @@ namespace http_handler {
 
                     ExecuteAuthorizedAsync(req, std::forward<Send>(send), [this, &req](const model::Player& player, const model::Token&, Send&& send_async) {
                         player.GetSession()->Dispatch([this, &player, req_version = req.version(), req_keep_alive = req.keep_alive(), is_head = (req.method() == http::verb::head), send_async = std::move(send_async)]() mutable {
-                            json::object players_json;
+                            json::object root_obj;
                             if (const auto session = player.GetSession()) {
+                                json::object players_json;
                                 for (const auto& p : game_.GetPlayers()) {
                                     if (p->GetSession() == session) {
                                         json::object player_obj;
@@ -242,17 +244,34 @@ namespace http_handler {
                                                 player_obj["dir"] = "R";
                                                 break;
                                         }
+                                        json::array bag_json;
+                                        for (const auto& item : p->GetDog()->GetBag()) {
+                                            json::object item_obj;
+                                            item_obj["id"] = item.id;
+                                            item_obj["type"] = item.type;
+                                            bag_json.push_back(item_obj);
+                                        }
+                                        player_obj["bag"] = bag_json;
+                                        player_obj["score"] = p->GetDog()->GetScore();
                                         players_json[std::to_string(*p->GetId())] = player_obj;
                                     }
                                 }
+                                root_obj["players"] = players_json;
+
+                                json::object lost_objects_json;
+                                for (const auto& [id, lost_object] : session->GetLostObjects()) {
+                                    json::object lost_object_obj;
+                                    lost_object_obj["type"] = lost_object.type;
+                                    lost_object_obj["pos"] = json::array{lost_object.pos.x, lost_object.pos.y};
+                                    lost_objects_json[std::to_string(id)] = lost_object_obj;
+                                }
+                                root_obj["lostObjects"] = lost_objects_json;
                             }
                             http::response<http::string_body> response(http::status::ok, req_version);
                             response.set(http::field::content_type, "application/json");
                             response.set(http::field::cache_control, "no-cache");
                             response.keep_alive(req_keep_alive);
 
-                            json::object root_obj;
-                            root_obj["players"] = players_json;
                             response.body() = json::serialize(root_obj);
 
                             response.prepare_payload();
@@ -366,11 +385,13 @@ namespace http_handler {
                     }
                 }
 
-                if (req.method() != http::verb::get && req.method() != http::verb::head) {
-                    return send(MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive()));
-                }
-
                 if (target.starts_with(endpoints::MAPS)) {
+                    if (req.method() != http::verb::get && req.method() != http::verb::head) {
+                        auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive());
+                        resp.set(http::field::allow, "GET, HEAD");
+                        return send(resp);
+                    }
+
                     if (target == endpoints::MAPS) {
                         auto resp = MakeMapsListResponse(req.version(), req.keep_alive());
                         if (req.method() == http::verb::head) {
@@ -435,6 +456,7 @@ namespace http_handler {
 
     private:
         model::Game& game_;
+        extra_data::ExtraData& extra_data_;
         std::filesystem::path static_path_;
         bool auto_tick_mode_ = false;
 
@@ -523,6 +545,6 @@ namespace http_handler {
 
         [[nodiscard]] http::response<http::string_body> MakeMapsListResponse(unsigned version, bool keep_alive) const;
 
-        [[nodiscard]] static http::response<http::string_body> MakeMapDescriptionResponse(const model::Map& map, unsigned version, bool keep_alive);
+        [[nodiscard]] http::response<http::string_body> MakeMapDescriptionResponse(const model::Map& map, unsigned version, bool keep_alive);
     };
 } // namespace http_handler

@@ -4,6 +4,7 @@
 #include "util/logging.h"
 #include "util/ticker.h"
 #include "net/request_handler.h"
+#include "extra_data.h"
 
 #include <boost/asio/signal_set.hpp>
 #include <csignal>
@@ -14,6 +15,7 @@
 #include <boost/log/utility/manipulators/add_value.hpp>
 #include <optional>
 #include <boost/program_options.hpp>
+#include <random>
 
 
 namespace net = boost::asio;
@@ -100,7 +102,13 @@ int main(int argc, const char* argv[]) {
         net::io_context ioc(static_cast<int>(num_threads));
 
         // Загружаем карту из файла и строим модель игры
-        model::Game game = json_loader::LoadGame(args.config_file, ioc, args.randomize_spawn_points);
+        extra_data::ExtraData extra_data;
+        auto random_generator = [] {
+            thread_local std::mt19937 gen{std::random_device{}()};
+            std::uniform_real_distribution<> dis(0.0, 1.0);
+            return dis(gen);
+        };
+        model::Game game = json_loader::LoadGame(args.config_file, ioc, args.randomize_spawn_points, random_generator, extra_data);
         std::filesystem::path static_path(args.www_root);
 
         // Добавляем асинхронный обработчик сигналов SIGINT и SIGTERM
@@ -112,7 +120,7 @@ int main(int argc, const char* argv[]) {
         });
 
         // Создаём обработчик запросов
-        http_handler::RequestHandler handler{game, static_path, args.tick_period.has_value()};
+        http_handler::RequestHandler handler{game, extra_data, static_path, args.tick_period.has_value()};
         http_handler::LoggingRequestHandler logging_handler{handler};
 
         // Запускаем обработчик HTTP-запросов, передав ему модель игры
