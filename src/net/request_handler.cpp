@@ -47,13 +47,14 @@ namespace serialization {
         return offices_arr;
     }
 
-    json::object SerializeMap(const model::Map& map) {
+    json::object SerializeMap(const model::Map& map, const extra_data::ExtraData& extra_data) {
         json::object map_obj;
         map_obj["id"] = *map.GetId();
         map_obj["name"] = map.GetName();
         map_obj["roads"] = SerializeRoads(map.GetRoads());
         map_obj["buildings"] = SerializeBuildings(map.GetBuildings());
         map_obj["offices"] = SerializeOffices(map.GetOffices());
+        map_obj["lootTypes"] = extra_data.GetLootTypes(map);
         return map_obj;
     }
 
@@ -94,8 +95,9 @@ std::string_view GetMimeType(const std::filesystem::path& path) {
     return "application/octet-stream";
 }
 
-RequestHandler::RequestHandler(model::Game& game, std::filesystem::path static_path, bool auto_tick_mode)
+RequestHandler::RequestHandler(model::Game& game, extra_data::ExtraData& extra_data, std::filesystem::path static_path, bool auto_tick_mode)
     : game_{game}
+    , extra_data_{extra_data}
     , static_path_{std::move(static_path)}
     , auto_tick_mode_{auto_tick_mode} {
 }
@@ -165,7 +167,7 @@ http::response<http::string_body> RequestHandler::MakeMapDescriptionResponse(con
     response.set(http::field::content_type, "application/json");
     response.set(http::field::cache_control, "no-cache");
     response.keep_alive(keep_alive);
-    response.body() = json::serialize(serialization::SerializeMap(map));
+    response.body() = json::serialize(serialization::SerializeMap(map, extra_data_));
     response.prepare_payload();
     return response;
 }

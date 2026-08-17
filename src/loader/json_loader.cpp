@@ -20,10 +20,10 @@ void ParseRoads(const json::value& roads_json, model::Map& map) {
 
         if (road_obj.contains("x1")) {
             model::Coord x1 = road_obj.at("x1").as_int64();
-            map.AddRoad(model::Road(model::Road::HORIZONTAL, model::Point{x0, y0}, x1));
+            map.AddRoad({model::Road::HORIZONTAL, {x0, y0}, x1});
         } else if (road_obj.contains("y1")) {
             model::Coord y1 = road_obj.at("y1").as_int64();
-            map.AddRoad(model::Road(model::Road::VERTICAL, model::Point{x0, y0}, y1));
+            map.AddRoad({model::Road::VERTICAL, {x0, y0}, y1});
         }
     }
 }
@@ -52,7 +52,7 @@ void ParseOffices(const json::value& offices_json, model::Map& map) {
 }  // namespace
 
 model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& ioc,
-                     bool randomize_spawn_points) {
+                     bool randomize_spawn_points, model::Game::LootGenerator::RandomGenerator random_generator, extra_data::ExtraData& extra_data) {
     std::ifstream file(json_path);
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open config file: " + json_path.string());
@@ -69,10 +69,24 @@ model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& io
         throw std::runtime_error("Failed to parse JSON config file: "s + e.what());
     }
 
-    model::Game game(ioc, randomize_spawn_points);
+    double loot_period = 5.0;
+    double loot_probability = 0.5;
+
+    if (const auto* loot_gen_config_ptr = value.as_object().if_contains("lootGeneratorConfig")) {
+        const auto& loot_gen_config_obj = loot_gen_config_ptr->as_object();
+        loot_period = loot_gen_config_obj.at("period").as_double();
+        loot_probability = loot_gen_config_obj.at("probability").as_double();
+    }
+
+    model::Game game(ioc, randomize_spawn_points, random_generator);
+    game.SetLootGeneratorConfig(loot_period, loot_probability);
 
     if (const auto* dog_speed_ptr = value.as_object().if_contains("defaultDogSpeed")) {
         game.SetDefaultDogSpeed(dog_speed_ptr->as_double());
+    }
+
+    if (const auto* bag_capacity_ptr = value.as_object().if_contains("defaultBagCapacity")) {
+        game.SetDefaultBagCapacity(static_cast<size_t>(bag_capacity_ptr->as_int64()));
     }
 
     for (const auto& maps_array = value.as_object().at("maps").as_array();
@@ -85,6 +99,29 @@ model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& io
         model::Map map(model::Map::Id{id}, name);
         if (const auto* dog_speed_ptr = map_obj.if_contains("dogSpeed")) {
             map.SetDogSpeed(dog_speed_ptr->as_double());
+        }
+
+        if (const auto* bag_capacity_ptr = map_obj.if_contains("bagCapacity")) {
+            map.SetBagCapacity(static_cast<size_t>(bag_capacity_ptr->as_int64()));
+        }
+
+        if (const auto* loot_types_ptr = map_obj.if_contains("lootTypes")) {
+            const auto& loot_types_array = loot_types_ptr->as_array();
+            map.SetLootTypeCount(loot_types_array.size());
+
+            std::vector<unsigned> loot_type_values;
+            loot_type_values.reserve(loot_types_array.size());
+            for (const auto& loot_type_val : loot_types_array) {
+                const auto& loot_type_obj = loot_type_val.as_object();
+                unsigned value = 0;
+                if (const auto* value_ptr = loot_type_obj.if_contains("value")) {
+                    value = static_cast<unsigned>(value_ptr->as_int64());
+                }
+                loot_type_values.push_back(value);
+            }
+            map.SetLootTypeValues(std::move(loot_type_values));
+
+            extra_data.AddLootTypes(map, loot_types_array);
         }
 
         // region deserialisation
