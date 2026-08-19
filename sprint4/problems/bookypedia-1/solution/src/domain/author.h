@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 #include "../util/tagged_uuid.h"
 
@@ -34,6 +35,7 @@ private:
 class AuthorRepository {
 public:
     virtual void Save(const Author& author) = 0;
+    virtual std::vector<Author> GetAuthors() = 0;
 
 protected:
     ~AuthorRepository() = default;
