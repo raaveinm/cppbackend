@@ -19,31 +19,55 @@ if(RUN_CONAN)
     endif()
 
     if(APPLE)
-        set(COMPILER_SETTINGS
-                -s compiler=apple-clang
-                -s compiler.version=21.0
-                -s compiler.libcxx=libc++
-                -s compiler.cppstd=${CMAKE_CXX_STANDARD}
+        set(PROFILE_SETTINGS
+"compiler=apple-clang
+compiler.version=21.0
+compiler.libcxx=libc++
+compiler.cppstd=${CMAKE_CXX_STANDARD}"
         )
+        set(PROFILE_CONF "")
     else()
         if(CMAKE_CXX_COMPILER_VERSION)
             string(REGEX MATCH "^[0-9]+" GCC_MAJOR_VERSION "${CMAKE_CXX_COMPILER_VERSION}")
         else()
             set(GCC_MAJOR_VERSION "11")
         endif()
-        set(COMPILER_SETTINGS
-            -s compiler=gcc
-            -s compiler.version=${GCC_MAJOR_VERSION}
-            -s compiler.libcxx=libstdc++11
-            -s compiler.cppstd=${CMAKE_CXX_STANDARD}
+        set(PROFILE_SETTINGS
+"compiler=gcc
+compiler.version=${GCC_MAJOR_VERSION}
+compiler.libcxx=libstdc++11
+compiler.cppstd=${CMAKE_CXX_STANDARD}"
         )
+        set(PROFILE_CONF "")
+        if(CMAKE_C_COMPILER AND CMAKE_CXX_COMPILER)
+            set(PROFILE_CONF
+"[conf]
+tools.build:compiler_executables={\"c\":\"${CMAKE_C_COMPILER}\",\"cpp\":\"${CMAKE_CXX_COMPILER}\"}"
+            )
+        endif()
     endif()
+
+    # Extra profile layered on top of "default": overrides the compiler settings to
+    # match CLion's toolchain, and pins an older CMake as a tool_requires since some
+    # vendored dependencies (e.g. libpqxx) ship CMake buildsystems that rely on
+    # internal modules removed from newer CMake.
+    set(CONAN_OVERRIDE_PROFILE "${CMAKE_BINARY_DIR}/conan_override_profile.txt")
+    file(WRITE "${CONAN_OVERRIDE_PROFILE}"
+"[settings]
+${PROFILE_SETTINGS}
+build_type=${CMAKE_BUILD_TYPE}
+
+[tool_requires]
+cmake/3.19.8
+
+${PROFILE_CONF}
+")
 
     execute_process(
             COMMAND "${CONAN_EXECUTABLE}" install "${CMAKE_CURRENT_SOURCE_DIR}"
             --output-folder=${CMAKE_BINARY_DIR}
-            -s build_type=${CMAKE_BUILD_TYPE}
-            ${COMPILER_SETTINGS}
+            --profile:host=default
+            --profile:host=${CONAN_OVERRIDE_PROFILE}
             --build=missing
             WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
             RESULT_VARIABLE CONAN_RES
