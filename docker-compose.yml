@@ -62,6 +62,18 @@ services:
     networks:
       - monitoring
 
+  postgres:
+    image: postgres:latest
+    container_name: shop-postgres
+    environment:
+      POSTGRES_DB: game_database
+      POSTGRES_USER: raaveinm_
+      POSTGRES_PASSWORD: CURE64cure1268
+    ports:
+      - "7894:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
 networks:
   monitoring:
     driver: bridge
