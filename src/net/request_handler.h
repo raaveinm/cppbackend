@@ -13,6 +13,7 @@
 #include "../util/logging.h"
 #include "../model/model.h"
 #include "../extra_data.h"
+#include "../db/postgres.h"
 
 namespace serialization {
     namespace json = boost::json;
@@ -42,10 +43,19 @@ namespace http_handler {
         constexpr std::string_view GAME_STATE = "/api/v1/game/state"sv;
         constexpr std::string_view GAME_PLAYER_ACTION = "/api/v1/game/player/action"sv;
         constexpr std::string_view GAME_TICK = "/api/v1/game/tick"sv;
+        constexpr std::string_view GAME_RECORDS = "/api/v1/game/records"sv;
     }
 
     std::string UrlDecode(std::string_view src);
     std::string_view GetMimeType(const std::filesystem::path& path);
+
+    //  GET /api/v1/game/records.
+    struct RecordsParams {
+        size_t start = 0;
+        size_t max_items = 100;
+    };
+
+    std::optional<RecordsParams> ParseRecordsQuery(std::string_view query);
 
     class RequestHandler; // Forward declaration
 
@@ -102,7 +112,8 @@ namespace http_handler {
 
     class RequestHandler {
     public:
-        explicit RequestHandler(model::Game& game, extra_data::ExtraData& extra_data, std::filesystem::path static_path, bool auto_tick_mode = false);
+        explicit RequestHandler(model::Game& game, extra_data::ExtraData& extra_data, std::filesystem::path static_path,
+                                postgres::LeaderboardRepository* leaderboard = nullptr, bool auto_tick_mode = false);
 
         RequestHandler(const RequestHandler&) = delete;
         RequestHandler& operator=(const RequestHandler&) = delete;
@@ -161,7 +172,7 @@ namespace http_handler {
 
                         json::object resp_obj;
                         resp_obj["authToken"] = *token;
-                        resp_obj["playerId"] = *player.GetId();
+                        resp_obj["playerId"] = *player->GetId();
 
                         response.body() = json::serialize(resp_obj);
                         response.prepare_payload();
@@ -220,10 +231,11 @@ namespace http_handler {
                         return send(resp);
                     }
 
-                    ExecuteAuthorizedAsync(req, std::forward<Send>(send), [this, &req](const model::Player& player, const model::Token&, Send&& send_async) {
-                        player.GetSession()->Dispatch([this, &player, req_version = req.version(), req_keep_alive = req.keep_alive(), is_head = (req.method() == http::verb::head), send_async = std::move(send_async)]() mutable {
+                    ExecuteAuthorizedAsync(req, std::forward<Send>(send), [this, &req](std::shared_ptr<model::Player> player, const model::Token&, Send&& send_async) {
+                        auto* session_ptr = player->GetSession();
+                        session_ptr->Dispatch([this, player = std::move(player), req_version = req.version(), req_keep_alive = req.keep_alive(), is_head = (req.method() == http::verb::head), send_async = std::move(send_async)]() mutable {
                             json::object root_obj;
-                            if (const auto session = player.GetSession()) {
+                            if (const auto session = player->GetSession()) {
                                 json::object players_json;
                                 for (const auto& p : game_.GetPlayers()) {
                                     if (p->GetSession() == session) {
@@ -291,7 +303,7 @@ namespace http_handler {
                         return send(resp);
                     }
 
-                    ExecuteAuthorizedAsync(req, std::forward<Send>(send), [this, &req](model::Player& player, const model::Token&, Send&& send_async) {
+                    ExecuteAuthorizedAsync(req, std::forward<Send>(send), [this, &req](std::shared_ptr<model::Player> player, const model::Token&, Send&& send_async) {
                         if (req.find(http::field::content_type) == req.end() || req.at(http::field::content_type) != "application/json") {
                             return send_async(MakeErrorResponse(http::status::bad_request, "invalidArgument", "Invalid content type", req.version(), req.keep_alive()));
                         }
@@ -306,23 +318,24 @@ namespace http_handler {
                                 return send_async(MakeErrorResponse(http::status::bad_request, "invalidArgument", "Failed to parse action", req.version(), req.keep_alive()));
                             }
                             std::string move = json::value_to<std::string>(move_val);
-                            double speed = player.GetSession()->GetMap()->GetDogSpeed();
+                            auto* session_ptr = player->GetSession();
+                            double speed = session_ptr->GetMap()->GetDogSpeed();
 
-                            player.GetSession()->Dispatch([&player, move, speed, req_version = req.version(), req_keep_alive = req.keep_alive(), send_async = std::move(send_async)]() mutable {
+                            session_ptr->Dispatch([player = std::move(player), move, speed, req_version = req.version(), req_keep_alive = req.keep_alive(), send_async = std::move(send_async)]() mutable {
                                 if (move == "L") {
-                                    player.GetDog()->SetSpeed({-speed, 0});
-                                    player.GetDog()->SetDirection(model::Direction::WEST);
+                                    player->GetDog()->SetSpeed({-speed, 0});
+                                    player->GetDog()->SetDirection(model::Direction::WEST);
                                 } else if (move == "R") {
-                                    player.GetDog()->SetSpeed({speed, 0});
-                                    player.GetDog()->SetDirection(model::Direction::EAST);
+                                    player->GetDog()->SetSpeed({speed, 0});
+                                    player->GetDog()->SetDirection(model::Direction::EAST);
                                 } else if (move == "U") {
-                                    player.GetDog()->SetSpeed({0, -speed});
-                                    player.GetDog()->SetDirection(model::Direction::NORTH);
+                                    player->GetDog()->SetSpeed({0, -speed});
+                                    player->GetDog()->SetDirection(model::Direction::NORTH);
                                 } else if (move == "D") {
-                                    player.GetDog()->SetSpeed({0, speed});
-                                    player.GetDog()->SetDirection(model::Direction::SOUTH);
+                                    player->GetDog()->SetSpeed({0, speed});
+                                    player->GetDog()->SetDirection(model::Direction::SOUTH);
                                 } else if (move.empty()) {
-                                    player.GetDog()->SetSpeed({0, 0});
+                                    player->GetDog()->SetSpeed({0, 0});
                                 } else {
                                     return send_async(MakeErrorResponse(http::status::bad_request, "invalidArgument", "Failed to parse action", req_version, req_keep_alive));
                                 }
@@ -382,6 +395,51 @@ namespace http_handler {
 
                     } catch (...) {
                         return send(MakeErrorResponse(http::status::bad_request, "invalidArgument", "Failed to parse tick request JSON", req.version(), req.keep_alive()));
+                    }
+                }
+
+                const auto query_pos = target.find('?');
+                if (target.substr(0, query_pos) == endpoints::GAME_RECORDS) {
+                    if (req.method() != http::verb::get && req.method() != http::verb::head) {
+                        auto resp = MakeErrorResponse(http::status::method_not_allowed, "invalidMethod", "Invalid method", req.version(), req.keep_alive());
+                        resp.set(http::field::allow, "GET, HEAD");
+                        return send(resp);
+                    }
+
+                    const auto query = (query_pos == std::string_view::npos)
+                                           ? std::string_view{}
+                                           : target.substr(query_pos + 1);
+                    const auto params = ParseRecordsQuery(query);
+                    if (!params) {
+                        return send(MakeErrorResponse(http::status::bad_request, "badRequest", "maxItems must not exceed 100", req.version(), req.keep_alive()));
+                    }
+
+                    if (!leaderboard_) {
+                        return send(MakeErrorResponse(http::status::internal_server_error, "serverError", "Leaderboard is not configured", req.version(), req.keep_alive()));
+                    }
+
+                    try {
+                        json::array records_json;
+                        for (const auto& entry : leaderboard_->GetRecords(params->start, params->max_items)) {
+                            json::object entry_obj;
+                            entry_obj["name"] = entry.name;
+                            entry_obj["score"] = entry.score;
+                            entry_obj["playTime"] = entry.play_time;
+                            records_json.push_back(std::move(entry_obj));
+                        }
+
+                        http::response<http::string_body> response(http::status::ok, req.version());
+                        response.set(http::field::content_type, "application/json");
+                        response.set(http::field::cache_control, "no-cache");
+                        response.keep_alive(req.keep_alive());
+                        response.body() = json::serialize(records_json);
+                        response.prepare_payload();
+                        if (req.method() == http::verb::head) {
+                            response.body().clear();
+                        }
+                        return send(response);
+                    } catch (const std::exception& ex) {
+                        return send(MakeErrorResponse(http::status::internal_server_error, "serverError", ex.what(), req.version(), req.keep_alive()));
                     }
                 }
 
@@ -458,12 +516,13 @@ namespace http_handler {
         model::Game& game_;
         extra_data::ExtraData& extra_data_;
         std::filesystem::path static_path_;
+        postgres::LeaderboardRepository* leaderboard_ = nullptr;
         bool auto_tick_mode_ = false;
 
         template <typename Body, typename Allocator, typename Fn>
         auto ExecuteAuthorized(const http::request<Body, http::basic_fields<Allocator>>& req, Fn&& action) {
             if (auto token = TryExtractToken(req)) {
-                if (auto* player = game_.FindPlayerByToken(*token); player) {
+                if (auto player = game_.FindPlayerByToken(*token)) {
                     return action(*player, *token);
                 }
                 return MakeErrorResponse(
@@ -486,8 +545,8 @@ namespace http_handler {
         template <typename Body, typename Allocator, typename Send, typename Fn>
         void ExecuteAuthorizedAsync(const http::request<Body, http::basic_fields<Allocator>>& req, Send&& send, Fn&& action) {
             if (auto token = TryExtractToken(req)) {
-                if (auto* player = game_.FindPlayerByToken(*token); player) {
-                    return action(*player, *token, std::forward<Send>(send));
+                if (auto player = game_.FindPlayerByToken(*token)) {
+                    return action(std::move(player), *token, std::forward<Send>(send));
                 }
                 return send(MakeErrorResponse(
                     http::status::unauthorized,

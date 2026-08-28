@@ -5,10 +5,16 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <functional>
+#include <mutex>
+#include <shared_mutex>
+#include <utility>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/signals2.hpp>
 
+#include "player_record.h"
 #include "../util/tagged.h"
 #include "../util/token_generator.h"
 #include "../loot_generator.h"
@@ -294,9 +300,17 @@ public:
     Direction GetDirection() const noexcept { return direction_; }
     const Bag& GetBag() const noexcept { return bag_; }
     unsigned GetScore() const noexcept { return score_; }
-
+    double GetTotalPlayTime() const noexcept { return play_time_; }
+    double GetIdleTime() const noexcept { return idle_time_; }
+    bool IsStopped() const noexcept;
     void SetPosition(Point2D position) { position_ = position; }
-    void SetSpeed(Speed2D speed) { speed_ = speed; }
+    void SetSpeed(Speed2D speed) {
+        speed_ = speed;
+        if (!IsStopped()) {
+            idle_time_ = 0.0;
+        }
+    }
+
     void SetDirection(Direction direction) { direction_ = direction; }
 
     bool IsBagFull() const noexcept { return bag_.size() >= bag_capacity_; }
@@ -311,9 +325,6 @@ public:
 
     void EmptyBag() { bag_.clear(); }
 
-    // Returns the bag contents to the base: adds up the value of every item
-    // in the bag using the map's per-type values, credits it to the score,
-    // and empties the bag.
     unsigned DropOffItems(const Map& map) {
         unsigned total_value = 0;
         for (const auto& item : bag_) {
@@ -336,19 +347,24 @@ private:
     Bag bag_;
     size_t bag_capacity_;
     unsigned score_ = 0;
+    double play_time_ = 0.0;
+    double idle_time_ = 0.0;
 };
 
 
 class GameSession {
 public:
-    using Dogs = std::vector<std::unique_ptr<Dog>>;
+    using Dogs = std::vector<std::shared_ptr<Dog>>;
     using LostObjects = std::unordered_map<uint32_t, LostObject>;
     using LootGenerator = loot_gen::LootGenerator;
+    using PlayerRetiredSignal = boost::signals2::signal<void(const Dog&, const PlayerRecord&)>;
 
     explicit GameSession(const Map* map, net::io_context& ioc, bool randomize_spawn_points,
                          LootGenerator::RandomGenerator random_generator,
-                         const std::optional<std::pair<double, double>>& loot_generator_config)
-        : map_{map}, strand_{net::make_strand(ioc)}, randomize_spawn_points_{randomize_spawn_points} {
+                         const std::optional<std::pair<double, double>>& loot_generator_config,
+                         double retirement_time)
+        : map_{map}, strand_{net::make_strand(ioc)}, randomize_spawn_points_{randomize_spawn_points}
+        , retirement_time_{retirement_time} {
         if (loot_generator_config) {
             loot_generator_ = std::make_unique<loot_gen::LootGenerator>(
                 std::chrono::milliseconds(static_cast<long long>(loot_generator_config->first * 1000)),
@@ -359,9 +375,13 @@ public:
 
     const Map* GetMap() const noexcept { return map_; }
     const Dogs& GetDogs() const { return dogs_; }
-    Dog* AddDog(const std::string& name);
+    std::shared_ptr<Dog> AddDog(const std::string& name);
 
     void Tick(std::chrono::milliseconds delta_t, bool sync = false);
+
+    boost::signals2::connection DoOnPlayerRetired(const PlayerRetiredSignal::slot_type& subscriber) {
+        return player_retired_signal_.connect(subscriber);
+    }
 
     template <typename Handler>
     void Dispatch(Handler&& handler) {
@@ -374,8 +394,11 @@ public:
 
 private:
     void ProcessCollisions(const std::vector<Point2D>& start_positions);
+    std::vector<std::pair<std::shared_ptr<Dog>, PlayerRecord>> ExtractRetiredDogs();
 
     const Map* map_;
+
+    std::mutex dogs_mutex_;
     Dogs dogs_;
     uint64_t dog_id_ = 0;
     net::strand<net::io_context::executor_type> strand_;
@@ -383,44 +406,53 @@ private:
     LostObjects lost_objects_;
     uint32_t lost_object_id_ = 0;
     std::unique_ptr<loot_gen::LootGenerator> loot_generator_;
+    double retirement_time_ = 60.0;
+    PlayerRetiredSignal player_retired_signal_;
 };
 
 class Player {
 public:
-    Player(Dog* dog, GameSession* session);
+    Player(std::shared_ptr<Dog> dog, GameSession* session);
 
     const PlayerId& GetId() const noexcept;
     const std::string& GetName() const noexcept;
     Dog* GetDog() const noexcept;
     GameSession* GetSession() const noexcept;
 
+    const Token& GetToken() const noexcept { return token_; }
+    void SetToken(Token token) { token_ = std::move(token); }
+
 private:
     PlayerId id_;
-    Dog* dog_;
+    std::shared_ptr<Dog> dog_;
     GameSession* session_;
+    Token token_{std::string{}};
     static uint64_t player_id_s;
 };
 
 class PlayerTokens {
 public:
-    Token AddPlayer(Player& player);
-    Player* FindPlayerByToken(const Token& token);
+    Token AddPlayer(const std::shared_ptr<Player>& player);
+    std::shared_ptr<Player> FindPlayerByToken(const Token& token);
+    void RemovePlayer(const Token& token);
 
 private:
     using TokenHasher = util::TaggedHasher<Token>;
-    std::unordered_map<Token, Player*, TokenHasher> token_to_player_;
+    std::unordered_map<Token, std::shared_ptr<Player>, TokenHasher> token_to_player_;
     util::TokenGenerator generator_;
 };
 
 class Players {
 public:
-    Player& Add(Dog* dog, GameSession* session);
+    std::shared_ptr<Player> Add(std::shared_ptr<Dog> dog, GameSession* session);
+    std::shared_ptr<Player> FindByDog(const Dog& dog) const;
     const Player* FindByDogIdAndMapId(const Dog::Id& dog_id, const Map::Id& map_id) const;
     const Player* FindById(const PlayerId& id) const;
-    const std::vector<std::unique_ptr<Player>>& GetPlayers() const { return players_; }
+    const std::vector<std::shared_ptr<Player>>& GetPlayers() const { return players_; }
+    void Remove(const Player& player);
 
 private:
-    std::vector<std::unique_ptr<Player>> players_;
+    std::vector<std::shared_ptr<Player>> players_;
 };
 
 
@@ -445,17 +477,21 @@ public:
         return (it != map_id_to_index_.end()) ? &maps_[it->second] : nullptr;
     }
 
-    GameSession* FindSession(const Map::Id& id) noexcept {
-        if (const auto it = map_id_to_session_index_.find(id); it != map_id_to_session_index_.end()) {
-            return sessions_.at(it->second).get();
-        }
-        return nullptr;
+    std::pair<std::shared_ptr<Player>, Token> AddPlayer(const Map::Id& map_id, const std::string& player_name);
+
+    std::shared_ptr<Player> FindPlayerByToken(const Token& token);
+    std::vector<std::shared_ptr<Player>> GetPlayers() const;
+    void SetPlayerRetiredHandler(std::function<void(const PlayerRecord&)> handler) {
+        on_player_retired_ = std::move(handler);
     }
 
-    std::pair<Player&, Token> AddPlayer(const Map::Id& map_id, const std::string& player_name);
+    double GetDogRetirementTime() const noexcept {
+        return dog_retirement_time_;
+    }
 
-    Player* FindPlayerByToken(const Token& token);
-    const std::vector<std::unique_ptr<Player>>& GetPlayers() const;
+    void SetDogRetirementTime(double seconds) noexcept {
+        dog_retirement_time_ = seconds;
+    }
 
     double GetDefaultDogSpeed() const noexcept {
         return default_dog_speed_;
@@ -487,16 +523,26 @@ private:
     using MapIdToIndex = std::unordered_map<Map::Id, size_t, MapIdHasher>;
     using MapIdToSessionIndex = std::unordered_map<Map::Id, size_t, MapIdHasher>;
 
+    void RetirePlayer(const Dog& dog, const PlayerRecord& record);
+    GameSession* FindSessionUnlocked(const Map::Id& id) noexcept {
+        if (const auto it = map_id_to_session_index_.find(id); it != map_id_to_session_index_.end()) {
+            return sessions_.at(it->second).get();
+        }
+        return nullptr;
+    }
+
     net::io_context& ioc_;
 
     std::vector<Map> maps_;
     MapIdToIndex map_id_to_index_;
 
+    mutable std::shared_mutex game_mutex_;
     GameSessions sessions_;
     MapIdToSessionIndex map_id_to_session_index_;
-
     Players players_;
     PlayerTokens player_tokens_;
+    std::function<void(const PlayerRecord&)> on_player_retired_;
+    double dog_retirement_time_ = 60.0;
     double default_dog_speed_ = 1.0;
     size_t default_bag_capacity_ = 3;
     bool randomize_spawn_points_ = false;

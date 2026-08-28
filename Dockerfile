@@ -9,12 +9,15 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install conan==1.62.0
+RUN pip3 install conan==2.31.1
 
 WORKDIR /app
 COPY conanfile.txt .
 
-RUN conan install . --build=missing -s build_type=Release -if build
+RUN conan profile detect --force
+RUN conan install . --output-folder=build --build=missing \
+    -s build_type=Release -s compiler.cppstd=20 \
+    -c "tools.build:cflags=['-std=gnu17']"
 
 COPY . .
 
@@ -31,6 +34,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install prometheus_client

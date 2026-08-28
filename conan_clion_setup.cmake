@@ -1,5 +1,10 @@
 set(ENV{CMAKE_POLICY_VERSION_MINIMUM} "3.5")
 
+if(DEFINED CMAKE_TOOLCHAIN_FILE)
+    message(STATUS "Toolchain file supplied; skipping .venv conan bootstrap")
+    return()
+endif()
+
 set(RUN_CONAN FALSE)
 if(NOT EXISTS "${CMAKE_BINARY_DIR}/conanbuildinfo.cmake")
     set(RUN_CONAN TRUE)
@@ -45,6 +50,7 @@ if(RUN_CONAN)
             -s build_type=${CMAKE_BUILD_TYPE}
             ${COMPILER_SETTINGS}
             --build=missing
+            -c "tools.build:cflags=['-std=gnu17']"
             WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
             RESULT_VARIABLE CONAN_RES
     )

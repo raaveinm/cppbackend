@@ -51,7 +51,7 @@ void ParseOffices(const json::value& offices_json, model::Map& map) {
 
 }  // namespace
 
-model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& ioc,
+std::unique_ptr<model::Game> LoadGame(const std::filesystem::path& json_path, net::io_context& ioc,
                      bool randomize_spawn_points, model::Game::LootGenerator::RandomGenerator random_generator, extra_data::ExtraData& extra_data) {
     std::ifstream file(json_path);
     if (!file.is_open()) {
@@ -78,15 +78,19 @@ model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& io
         loot_probability = loot_gen_config_obj.at("probability").as_double();
     }
 
-    model::Game game(ioc, randomize_spawn_points, random_generator);
-    game.SetLootGeneratorConfig(loot_period, loot_probability);
+    auto game = std::make_unique<model::Game>(ioc, randomize_spawn_points, random_generator);
+    game->SetLootGeneratorConfig(loot_period, loot_probability);
 
     if (const auto* dog_speed_ptr = value.as_object().if_contains("defaultDogSpeed")) {
-        game.SetDefaultDogSpeed(dog_speed_ptr->as_double());
+        game->SetDefaultDogSpeed(dog_speed_ptr->as_double());
     }
 
     if (const auto* bag_capacity_ptr = value.as_object().if_contains("defaultBagCapacity")) {
-        game.SetDefaultBagCapacity(static_cast<size_t>(bag_capacity_ptr->as_int64()));
+        game->SetDefaultBagCapacity(static_cast<size_t>(bag_capacity_ptr->as_int64()));
+    }
+
+    if (const auto* retirement_ptr = value.as_object().if_contains("dogRetirementTime")) {
+        game->SetDogRetirementTime(retirement_ptr->to_number<double>());
     }
 
     for (const auto& maps_array = value.as_object().at("maps").as_array();
@@ -138,7 +142,7 @@ model::Game LoadGame(const std::filesystem::path& json_path, net::io_context& io
         }
         // endregion
 
-        game.AddMap(std::move(map));
+        game->AddMap(std::move(map));
     }
 
     return game;

@@ -17,16 +17,15 @@ list(APPEND CMAKE_PREFIX_PATH ${CMAKE_BINARY_DIR})
 
 find_package(Boost REQUIRED)
 find_package(Catch2 REQUIRED)
+find_package(libpqxx REQUIRED)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-# Static library with the game model and everything covered by the Catch2 tests.
-# Networking / connection-handling code is intentionally left out: it isn't
-# exercised by the tests, so it stays in the executable targets below.
 add_library(game_model_lib STATIC
 		src/model/model.h
 		src/model/model.cpp
+		src/model/player_record.h
 		src/loot_generator.h
 		src/loot_generator.cpp
 		src/extra_data.h
@@ -47,6 +46,18 @@ target_link_libraries(game_model_lib PUBLIC
 		Boost::boost
 )
 
+add_library(game_db_lib STATIC
+		src/db/connection_pool.h
+		src/db/postgres.h
+		src/db/postgres.cpp
+)
+
+target_include_directories(game_db_lib PUBLIC src)
+target_link_libraries(game_db_lib PUBLIC
+		Threads::Threads
+		libpqxx::pqxx
+)
+
 add_executable(game_server
 		src/main.cpp
 		src/net/http_server.cpp
@@ -61,6 +72,7 @@ add_executable(game_server
 
 target_link_libraries(game_server PRIVATE
 		game_model_lib
+		game_db_lib
 		Boost::log_setup
 		Boost::log
 		Boost::program_options

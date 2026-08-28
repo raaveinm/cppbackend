@@ -169,11 +169,19 @@ RoadBoundary Map::GetAllowedBoundaries(Point2D pt, Direction dir) const {
     return result;
 }
 
+bool Dog::IsStopped() const noexcept {
+    return std::abs(speed_.x) < ZERO_SPEED_THRESHOLD && std::abs(speed_.y) < ZERO_SPEED_THRESHOLD;
+}
+
 void Dog::Tick(const std::chrono::milliseconds delta_t) {
     const auto delta_seconds = std::chrono::duration_cast<std::chrono::duration<double>>(delta_t).count();
 
-    if (abs(speed_.x) < ZERO_SPEED_THRESHOLD && abs(speed_.y) < ZERO_SPEED_THRESHOLD)
+    play_time_ += delta_seconds;
+
+    if (IsStopped()) {
+        idle_time_ += delta_seconds;
         return;
+    }
 
     Point2D proposed_pos{};
     proposed_pos.x = position_.x + speed_.x * delta_seconds;
@@ -195,29 +203,38 @@ void Dog::Tick(const std::chrono::milliseconds delta_t) {
 
 void GameSession::Tick(std::chrono::milliseconds delta_t, bool sync) {
     auto tick_action = [this, delta_t]() {
-        if (loot_generator_) {
-            unsigned int loot_count = loot_generator_->Generate(delta_t, lost_objects_.size(), dogs_.size());
-            for (unsigned int i = 0; i < loot_count; ++i) {
-                lost_objects_.emplace(lost_object_id_, LostObject{
-                    lost_object_id_,
-                    map_->GetRandomLootType(),
-                    map_->GetRandomPointOnRoads()
-                });
-                lost_object_id_++;
+        std::vector<std::pair<std::shared_ptr<Dog>, PlayerRecord>> retired;
+        {
+            std::lock_guard dogs_lock{dogs_mutex_};
+            if (loot_generator_) {
+                unsigned int loot_count = loot_generator_->Generate(delta_t, lost_objects_.size(), dogs_.size());
+                for (unsigned int i = 0; i < loot_count; ++i) {
+                    lost_objects_.emplace(lost_object_id_, LostObject{
+                        lost_object_id_,
+                        map_->GetRandomLootType(),
+                        map_->GetRandomPointOnRoads()
+                    });
+                    lost_object_id_++;
+                }
             }
+
+            std::vector<Point2D> start_positions;
+            start_positions.reserve(dogs_.size());
+            for (auto& dog : dogs_) {
+                start_positions.push_back(dog->GetPosition());
+            }
+
+            for (auto& dog : dogs_) {
+                dog->Tick(delta_t);
+            }
+
+            ProcessCollisions(start_positions);
+            retired = ExtractRetiredDogs();
         }
 
-        std::vector<Point2D> start_positions;
-        start_positions.reserve(dogs_.size());
-        for (auto& dog : dogs_) {
-            start_positions.push_back(dog->GetPosition());
+        for (const auto& [dog, record] : retired) {
+            player_retired_signal_(*dog, record);
         }
-
-        for (auto& dog : dogs_) {
-            dog->Tick(delta_t);
-        }
-
-        ProcessCollisions(start_positions);
     };
 
     if (sync) {
@@ -333,6 +350,24 @@ void GameSession::ProcessCollisions(const std::vector<Point2D>& start_positions)
     }
 }
 
+std::vector<std::pair<std::shared_ptr<Dog>, PlayerRecord>> GameSession::ExtractRetiredDogs() {
+    std::vector<std::pair<std::shared_ptr<Dog>, PlayerRecord>> retired;
+
+    for (auto it = dogs_.begin(); it != dogs_.end();) {
+        const Dog& dog = **it;
+        if (dog.GetIdleTime() < retirement_time_) {
+            ++it;
+            continue;
+        }
+
+        retired.emplace_back(*it, PlayerRecord{dog.GetName(),
+                                               static_cast<int>(dog.GetScore()),
+                                               dog.GetTotalPlayTime()});
+        it = dogs_.erase(it);
+    }
+    return retired;
+}
+
 void Game::AddMap(Map map) {
     map.SetDefaultDogSpeed(default_dog_speed_);
     map.SetDefaultBagCapacity(default_bag_capacity_);
@@ -350,12 +385,23 @@ void Game::AddMap(Map map) {
 }
 
 void Game::Tick(std::chrono::milliseconds delta_t) {
-    for (auto& session : sessions_) {
+    std::vector<GameSession*> sessions;
+    {
+        std::shared_lock lock{game_mutex_};
+        sessions.reserve(sessions_.size());
+        for (const auto& session : sessions_) {
+            sessions.push_back(session.get());
+        }
+    }
+
+    for (auto* session : sessions) {
         session->Tick(delta_t);
     }
 }
 
-Dog* GameSession::AddDog(const std::string& name) {
+std::shared_ptr<Dog> GameSession::AddDog(const std::string& name) {
+    std::lock_guard dogs_lock{dogs_mutex_};
+
     Point2D pos{};
     if (randomize_spawn_points_) {
         pos = map_->GetRandomPointOnRoads();
@@ -363,32 +409,58 @@ Dog* GameSession::AddDog(const std::string& name) {
         auto start_point = map_->GetRoads().front().GetStart();
         pos = {static_cast<double>(start_point.x), static_cast<double>(start_point.y)};
     }
-    dogs_.emplace_back(std::make_unique<Dog>(Dog::Id{dog_id_++}, name, pos, this, map_->GetBagCapacity()));
-    return dogs_.back().get();
+    dogs_.emplace_back(std::make_shared<Dog>(Dog::Id{dog_id_++}, name, pos, this, map_->GetBagCapacity()));
+    return dogs_.back();
 }
 
-std::pair<Player&, Token> Game::AddPlayer(const Map::Id& map_id, const std::string& player_name) {
+std::pair<std::shared_ptr<Player>, Token> Game::AddPlayer(const Map::Id& map_id, const std::string& player_name) {
     auto* map = const_cast<Map*>(FindMap(map_id));
     if (!map) {
         throw std::invalid_argument("Map not found");
     }
 
-    auto* session = FindSession(map_id);
-    if (!session) {
-        sessions_.emplace_back(std::make_unique<GameSession>(map, ioc_, randomize_spawn_points_, random_generator_, loot_generator_config_));
-        map_id_to_session_index_[map_id] = sessions_.size() - 1;
-        session = sessions_.back().get();
+    GameSession* session = nullptr;
+    {
+        std::unique_lock lock{game_mutex_};
+        session = FindSessionUnlocked(map_id);
+        if (!session) {
+            sessions_.emplace_back(std::make_unique<GameSession>(map, ioc_, randomize_spawn_points_,
+                                                                 random_generator_, loot_generator_config_,
+                                                                 dog_retirement_time_));
+            map_id_to_session_index_[map_id] = sessions_.size() - 1;
+            session = sessions_.back().get();
+            session->DoOnPlayerRetired([this](const Dog& dog, const PlayerRecord& record) {
+                RetirePlayer(dog, record);
+            });
+        }
     }
 
-    auto* dog = session->AddDog(player_name);
-    auto& player = players_.Add(dog, session);
-    auto token = player_tokens_.AddPlayer(player);
+    auto dog = session->AddDog(player_name);
 
-    return {player, token};
+    std::unique_lock lock{game_mutex_};
+    auto player = players_.Add(std::move(dog), session);
+    auto token = player_tokens_.AddPlayer(player);
+    player->SetToken(token);
+
+    return {std::move(player), std::move(token)};
 }
 
-Player::Player(Dog* dog, GameSession* session)
-    : id_{player_id_s++}, dog_{dog}, session_{session} {}
+void Game::RetirePlayer(const Dog& dog, const PlayerRecord& record) {
+    {
+        std::unique_lock lock{game_mutex_};
+        if (auto player = players_.FindByDog(dog)) {
+            player_tokens_.RemovePlayer(player->GetToken());
+            players_.Remove(*player);
+        }
+    }
+
+    if (on_player_retired_) {
+        on_player_retired_(record);
+    }
+}
+
+Player::Player(std::shared_ptr<Dog> dog, GameSession* session)
+    : id_{player_id_s++}, dog_{std::move(dog)}, session_{session} {}
 
 const PlayerId& Player::GetId() const noexcept {
     return id_;
@@ -399,30 +471,47 @@ const std::string& Player::GetName() const noexcept {
 }
 
 Dog* Player::GetDog() const noexcept {
-    return dog_;
+    return dog_.get();
 }
 
 GameSession* Player::GetSession() const noexcept {
     return session_;
 }
 
-Token PlayerTokens::AddPlayer(Player& player) {
+Token PlayerTokens::AddPlayer(const std::shared_ptr<Player>& player) {
     const auto token_str = generator_.GenerateToken();
     Token token{token_str}; // Convert to model::Token
-    token_to_player_.emplace(token, &player);
+    token_to_player_.emplace(token, player);
     return token;
 }
 
-Player* PlayerTokens::FindPlayerByToken(const Token& token) {
-    if (token_to_player_.contains(token)) {
-        return token_to_player_.at(token);
+std::shared_ptr<Player> PlayerTokens::FindPlayerByToken(const Token& token) {
+    if (const auto it = token_to_player_.find(token); it != token_to_player_.end()) {
+        return it->second;
     }
     return nullptr;
 }
 
-Player& Players::Add(Dog* dog, GameSession* session) {
-    players_.emplace_back(std::make_unique<Player>(dog, session));
-    return *players_.back();
+void PlayerTokens::RemovePlayer(const Token& token) {
+    token_to_player_.erase(token);
+}
+
+std::shared_ptr<Player> Players::Add(std::shared_ptr<Dog> dog, GameSession* session) {
+    players_.emplace_back(std::make_shared<Player>(std::move(dog), session));
+    return players_.back();
+}
+
+std::shared_ptr<Player> Players::FindByDog(const Dog& dog) const {
+    for (const auto& player : players_) {
+        if (player->GetDog() == &dog) {
+            return player;
+        }
+    }
+    return nullptr;
+}
+
+void Players::Remove(const Player& player) {
+    std::erase_if(players_, [&player](const auto& p) { return p.get() == &player; });
 }
 
 const Player* Players::FindByDogIdAndMapId(const Dog::Id& dog_id, const Map::Id& map_id) const {
@@ -443,11 +532,13 @@ const Player* Players::FindById(const PlayerId& id) const {
     return nullptr;
 }
 
-Player* Game::FindPlayerByToken(const Token& token) {
+std::shared_ptr<Player> Game::FindPlayerByToken(const Token& token) {
+    std::shared_lock lock{game_mutex_};
     return player_tokens_.FindPlayerByToken(token);
 }
 
-const std::vector<std::unique_ptr<Player>>& Game::GetPlayers() const {
+std::vector<std::shared_ptr<Player>> Game::GetPlayers() const {
+    std::shared_lock lock{game_mutex_};
     return players_.GetPlayers();
 }
 

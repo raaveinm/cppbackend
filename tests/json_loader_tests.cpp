@@ -44,7 +44,8 @@ SCENARIO("Loot type values are parsed from the config file") {
         auto random_generator = [] { return 0.0; };
 
         WHEN("The game is loaded from the config") {
-            model::Game game = json_loader::LoadGame(tmp_path, ioc, false, random_generator, extra_data);
+            auto game_ptr = json_loader::LoadGame(tmp_path, ioc, false, random_generator, extra_data);
+            model::Game& game = *game_ptr;
 
             THEN("The map exposes the parsed values for every loot type") {
                 const auto* map = game.FindMap(model::Map::Id{"map1"s});

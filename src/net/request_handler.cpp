@@ -95,11 +95,71 @@ std::string_view GetMimeType(const std::filesystem::path& path) {
     return "application/octet-stream";
 }
 
-RequestHandler::RequestHandler(model::Game& game, extra_data::ExtraData& extra_data, std::filesystem::path static_path, bool auto_tick_mode)
+RequestHandler::RequestHandler(model::Game& game, extra_data::ExtraData& extra_data, std::filesystem::path static_path,
+                               postgres::LeaderboardRepository* leaderboard, bool auto_tick_mode)
     : game_{game}
     , extra_data_{extra_data}
     , static_path_{std::move(static_path)}
+    , leaderboard_{leaderboard}
     , auto_tick_mode_{auto_tick_mode} {
+}
+
+namespace {
+
+constexpr size_t MAX_RECORDS_PER_PAGE = 100;
+
+std::optional<size_t> ParseNonNegative(std::string_view text) {
+    if (text.empty() || text.size() > 19) {
+        return std::nullopt;
+    }
+    size_t value = 0;
+    for (const char ch : text) {
+        if (ch < '0' || ch > '9') {
+            return std::nullopt;
+        }
+        value = value * 10 + static_cast<size_t>(ch - '0');
+    }
+    return value;
+}
+
+}  // namespace
+
+std::optional<RecordsParams> ParseRecordsQuery(std::string_view query) {
+    RecordsParams params;
+
+    while (!query.empty()) {
+        const auto amp = query.find('&');
+        const auto pair = query.substr(0, amp);
+        query = (amp == std::string_view::npos) ? std::string_view{} : query.substr(amp + 1);
+
+        if (pair.empty()) {
+            continue;
+        }
+
+        const auto eq = pair.find('=');
+        if (eq == std::string_view::npos) {
+            return std::nullopt;
+        }
+
+        const auto key = pair.substr(0, eq);
+        const auto value = ParseNonNegative(pair.substr(eq + 1));
+        if (!value) {
+            return std::nullopt;
+        }
+
+        if (key == "start") {
+            params.start = *value;
+        } else if (key == "maxItems") {
+            params.max_items = *value;
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    if (params.max_items < 1 || params.max_items > MAX_RECORDS_PER_PAGE) {
+        return std::nullopt;
+    }
+    return params;
 }
 
 bool RequestHandler::IsSubPath(const std::filesystem::path& path, const std::filesystem::path& base) {

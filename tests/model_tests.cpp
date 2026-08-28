@@ -43,7 +43,7 @@ SCENARIO("Model item spawning logic") {
         std::optional<std::pair<double, double>> loot_gen_config = {{1.0, 1.0}};
         auto random_generator = [] { return 1.0; };
 
-        model::GameSession session{&map, ioc, false, random_generator, loot_gen_config};
+        model::GameSession session{&map, ioc, false, random_generator, loot_gen_config, 1e9};
 
         WHEN("GameSession::Tick is called without any dogs") {
             THEN("No loot is generated") {

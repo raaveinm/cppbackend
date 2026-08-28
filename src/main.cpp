@@ -5,6 +5,7 @@
 #include "util/ticker.h"
 #include "net/request_handler.h"
 #include "extra_data.h"
+#include "db/postgres.h"
 
 #include <boost/asio/signal_set.hpp>
 #include <csignal>
@@ -24,6 +25,8 @@ namespace json = boost::json;
 using namespace std::literals;
 
 namespace {
+
+constexpr const char* DB_URL_ENV_NAME = "GAME_DB_URL";
 
 struct Args {
     std::optional<uint64_t> tick_period;
@@ -94,12 +97,21 @@ int main(int argc, const char* argv[]) {
 
         logging::Init();
 
+        const char* db_url = std::getenv(DB_URL_ENV_NAME);
+        if (!db_url || *db_url == '\0') {
+            throw std::runtime_error(DB_URL_ENV_NAME + " environment variable is not specified"s);
+        }
+
         const auto address = net::ip::make_address("0.0.0.0");
         constexpr net::ip::port_type port = 8080;
 
         // Инициализируем io_context
         const unsigned num_threads = std::thread::hardware_concurrency();
         net::io_context ioc(static_cast<int>(num_threads));
+
+        // One connection per worker thread: every thread that can serve a
+        // /records request or run a retirement write needs its own.
+        postgres::Database db{db_url, std::max(1u, num_threads)};
 
         // Загружаем карту из файла и строим модель игры
         extra_data::ExtraData extra_data;
@@ -108,8 +120,13 @@ int main(int argc, const char* argv[]) {
             std::uniform_real_distribution<> dis(0.0, 1.0);
             return dis(gen);
         };
-        model::Game game = json_loader::LoadGame(args.config_file, ioc, args.randomize_spawn_points, random_generator, extra_data);
+        auto game_ptr = json_loader::LoadGame(args.config_file, ioc, args.randomize_spawn_points, random_generator, extra_data);
+        model::Game& game = *game_ptr;
         std::filesystem::path static_path(args.www_root);
+
+        game.SetPlayerRetiredHandler([&db](const model::PlayerRecord& record) {
+            db.GetLeaderboard().SaveRetiredPlayer(record);
+        });
 
         // Добавляем асинхронный обработчик сигналов SIGINT и SIGTERM
         net::signal_set signals(ioc, SIGINT, SIGTERM);
@@ -120,7 +137,7 @@ int main(int argc, const char* argv[]) {
         });
 
         // Создаём обработчик запросов
-        http_handler::RequestHandler handler{game, extra_data, static_path, args.tick_period.has_value()};
+        http_handler::RequestHandler handler{game, extra_data, static_path, &db.GetLeaderboard(), args.tick_period.has_value()};
         http_handler::LoggingRequestHandler logging_handler{handler};
 
         // Запускаем обработчик HTTP-запросов, передав ему модель игры
