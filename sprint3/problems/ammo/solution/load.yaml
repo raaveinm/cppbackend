@@ -1,7 +1,7 @@
 overload:
   enabled: false
 phantom:
-  address: 127.0.0.1:8080
+  address: cppserver:8080
   ammofile: ammo.txt
   ammo_type: uri
   load_profile:

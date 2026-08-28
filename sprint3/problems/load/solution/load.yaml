@@ -1,5 +1,5 @@
 phantom:
-  address: 127.0.0.1:8080
+  address: cppserver:8080
   connection_test: false
   load_profile:
     load_type: rps
