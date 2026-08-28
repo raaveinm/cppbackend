@@ -1,5 +1,11 @@
 set(ENV{CMAKE_POLICY_VERSION_MINIMUM} "3.5")
 
+# This file is a CLion-local dev convenience (invokes the IDE's own .venv/conan).
+# CI builds run conan explicitly before invoking cmake, so skip this entirely there.
+if(DEFINED ENV{CI})
+    return()
+endif()
+
 set(RUN_CONAN FALSE)
 if(NOT EXISTS "${CMAKE_BINARY_DIR}/conanbuildinfo.cmake")
     set(RUN_CONAN TRUE)

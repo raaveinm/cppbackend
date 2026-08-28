@@ -30,7 +30,11 @@ void AuthorRepositoryImpl::DeleteAuthor(const std::string& name) {
         throw std::runtime_error("Author not found");
     }
     auto author_id = id_row[0][0].as<std::string>();
-    // book_tags rows are removed automatically via ON DELETE CASCADE.
+    // Explicitly remove book_tags: the DB schema is not guaranteed to have
+    // ON DELETE CASCADE set up (e.g. when the tables were pre-created externally).
+    work.exec_params(
+        R"(DELETE FROM book_tags WHERE book_id IN (SELECT id FROM books WHERE author_id=$1);)"_zv,
+        author_id);
     work.exec_params(R"(DELETE FROM books WHERE author_id=$1;)"_zv, author_id);
     work.exec_params(R"(DELETE FROM authors WHERE id=$1;)"_zv, author_id);
     work.commit();
@@ -158,7 +162,9 @@ WHERE b.id = $1;
 
 void BookRepositoryImpl::DeleteBook(const domain::BookId& id) {
     pqxx::work work{connection_};
-    // book_tags rows are removed automatically via ON DELETE CASCADE.
+    // Explicitly remove book_tags: the DB schema is not guaranteed to have
+    // ON DELETE CASCADE set up (e.g. when the tables were pre-created externally).
+    work.exec_params(R"(DELETE FROM book_tags WHERE book_id=$1;)"_zv, id.ToString());
     auto result = work.exec_params(R"(DELETE FROM books WHERE id=$1;)"_zv, id.ToString());
     if (result.affected_rows() != 1) {
         throw std::runtime_error("Book not found");

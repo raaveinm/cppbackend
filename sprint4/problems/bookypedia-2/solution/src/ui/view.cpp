@@ -206,8 +206,8 @@ bool View::DeleteBook(std::istream& cmd_input) const {
         }
 
         use_cases_.DeleteBook(domain::BookId::FromString(selected->id));
-    } catch (const std::exception&) {
-        output_ << "Failed to delete book"sv << std::endl;
+    } catch (const std::exception& e) {
+        output_ << e.what() << std::endl;
     }
     return true;
 }

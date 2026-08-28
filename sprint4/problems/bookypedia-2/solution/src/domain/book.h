@@ -107,6 +107,7 @@ inline std::vector<std::string> NormalizeTags(const std::string& raw_tags) {
             result.push_back(collapsed);
         }
     }
+    std::sort(result.begin(), result.end());
     return result;
 }
 

@@ -17,4 +17,4 @@ find_package(libpqxx REQUIRED)
 find_package(Boost REQUIRED)
 
 add_executable(book_manager main.cpp)
-target_link_libraries(book_manager PRIVATE libpqxx::pqxx Boost::boost)
+target_link_libraries(book_manager PRIVATE libpqxx::pqxx Boost::boost Boost::json)
