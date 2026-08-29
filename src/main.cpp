@@ -7,6 +7,7 @@
 #include "extra_data.h"
 
 #include <boost/asio/signal_set.hpp>
+#include <cmath>
 #include <csignal>
 #include <iostream>
 #include <thread>
@@ -106,7 +107,7 @@ int main(int argc, const char* argv[]) {
         auto random_generator = [] {
             thread_local std::mt19937 gen{std::random_device{}()};
             std::uniform_real_distribution<> dis(0.0, 1.0);
-            return dis(gen);
+            return std::pow(dis(gen), 0.25);
         };
         model::Game game = json_loader::LoadGame(args.config_file, ioc, args.randomize_spawn_points, random_generator, extra_data);
         std::filesystem::path static_path(args.www_root);
