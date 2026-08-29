@@ -8,6 +8,7 @@
 #include "db/postgres.h"
 
 #include <boost/asio/signal_set.hpp>
+#include <cmath>
 #include <csignal>
 #include <iostream>
 #include <thread>
@@ -118,7 +119,7 @@ int main(int argc, const char* argv[]) {
         auto random_generator = [] {
             thread_local std::mt19937 gen{std::random_device{}()};
             std::uniform_real_distribution<> dis(0.0, 1.0);
-            return dis(gen);
+            return std::pow(dis(gen), 0.25);
         };
         auto game_ptr = json_loader::LoadGame(args.config_file, ioc, args.randomize_spawn_points, random_generator, extra_data);
         model::Game& game = *game_ptr;
