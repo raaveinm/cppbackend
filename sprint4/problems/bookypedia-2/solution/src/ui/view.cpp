@@ -225,7 +225,7 @@ bool View::EditBook(std::istream& cmd_input) const {
 
         auto selected = SelectBookFromCandidates(candidates);
         if (!selected) {
-            return true;
+            throw std::runtime_error("Book not found");
         }
 
         auto book = use_cases_.GetBookById(domain::BookId::FromString(selected->id));
