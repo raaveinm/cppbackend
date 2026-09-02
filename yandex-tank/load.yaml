@@ -1,0 +1,22 @@
+overload:
+  enabled: false
+phantom:
+  address: 127.0.0.1:8080
+  ammofile: ammo.txt
+  ammo_type: uri
+  load_profile:
+    load_type: rps
+    schedule: line(1, 100, 30s) const(100, 30s)
+  ssl: false
+
+autostop:
+  autostop:
+    - http(4xx,100%,1s)
+    - http(5xx,100%,1s)
+    - time(50ms,90%)
+
+console:
+  enabled: true
+
+telegraf:
+  enabled: false
